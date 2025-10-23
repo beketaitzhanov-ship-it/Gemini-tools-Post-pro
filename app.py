@@ -440,65 +440,62 @@ available_tools = {
     "get_static_info": get_static_info_tool_wrapper
 }
 
-tools_declaration = [
-    genai.Tool(
-        function_declarations=[
-            # Паспорт 1: Расчет Стоимости
-            genai.FunctionDeclaration(
-                name="calculate_delivery_cost",
-                description="Рассчитать точную стоимость доставки груза из Китая (Гуанчжоу/ИУ) в город Казахстана. Требует вес, тип товара, город И (объем ИЛИ габариты д*ш*в). Не вызывай, если чего-то не хватает!",
-                parameters=genai.Schema(
-                    type=genai.Type.OBJECT,
-                    properties={
-                        "weight": genai.Schema(type=genai.Type.NUMBER, description="Общий вес груза в КГ (обязательно)."),
-                        "product_type": genai.Schema(type=genai.Type.STRING, description="Категория товара (обязательно), например 'мебель', 'одежда', 'техника'. Используй 'общие', если неясно."),
-                        "city": genai.Schema(type=genai.Type.STRING, description="Город доставки в Казахстане (обязательно), например 'Астана', 'Алматы', 'Караганда'."),
-                        "volume": genai.Schema(type=genai.Type.NUMBER, description="Общий объем груза в м³ (кубических метрах). Указывать ТОЛЬКО если ИЗВЕСТЕН точный объем."),
-                        "length": genai.Schema(type=genai.Type.NUMBER, description="Длина ОДНОГО места груза в метрах ИЛИ сантиметрах (если объем неизвестен). Указывать ТОЛЬКО если volume не указан."),
-                        "width": genai.Schema(type=genai.Type.NUMBER, description="Ширина ОДНОГО места груза в метрах ИЛИ сантиметрах (если объем неизвестен). Указывать ТОЛЬКО если volume не указан."),
-                        "height": genai.Schema(type=genai.Type.NUMBER, description="Высота ОДНОГО места груза в метрах ИЛИ сантиметрах (если объем неизвестен). Указывать ТОЛЬКО если volume не указан.")
-                    },
-                    required=["weight", "product_type", "city"] # Объем/габариты Gemini должен извлечь и передать, если они есть
-                )
-            ),
-            # Паспорт 2: Отслеживание Груза
-            genai.FunctionDeclaration(
-                name="track_shipment",
-                description="Отследить груз по трек-номеру и получить его текущий статус, местоположение и маршрут. Требует трек-номер.",
-                parameters=genai.Schema(
-                    type=genai.Type.OBJECT,
-                    properties={ "track_number": genai.Schema(type=genai.Type.STRING, description="Трек-номер груза (обязательно), например GZ123456, IY789012.") },
-                    required=["track_number"]
-                )
-            ),
-             # Паспорт 3: Сохранение Заявки
-            genai.FunctionDeclaration(
-                name="save_application",
-                description="Сохранить заявку клиента в базу данных ПОСЛЕ успешного расчета и ЯВНОГО согласия клиента. Требует имя и телефон.",
-                parameters=genai.Schema(
-                    type=genai.Type.OBJECT,
-                    properties={
-                        "name": genai.Schema(type=genai.Type.STRING, description="Имя клиента (обязательно)."),
-                        "phone": genai.Schema(type=genai.Type.STRING, description="Номер телефона клиента (обязательно)."),
-                        "details": genai.Schema(type=genai.Type.STRING, description="Краткие детали расчета (опционально, например '50кг мебель в Астану').")
-                    },
-                    required=["name", "phone"]
-                )
-            ),
-            # Паспорт 4: Статическая Информация
-            genai.FunctionDeclaration(
-                name="get_static_info",
-                description="Получить информацию об условиях оплаты, процедуре доставки или объяснении тарифов.",
-                parameters=genai.Schema(
-                    type=genai.Type.OBJECT,
-                    properties={
-                        "topic": genai.Schema(type=genai.Type.STRING, description="Тема запроса (обязательно): 'оплата', 'тарифы' или 'процедура'.")
-                    },
-                    required=["topic"]
-                )
-            ),
-        ]
-    )
+# --- "Паспорта" Инструментов (ПРОСТО СПИСОК) ---
+function_declarations_list = [
+    # Паспорт 1: Расчет Стоимости
+    genai.FunctionDeclaration(
+        name="calculate_delivery_cost",
+        description="Рассчитать точную стоимость доставки груза из Китая (Гуанчжоу/ИУ) в город Казахстана. Требует вес, тип товара, город И (объем ИЛИ габариты д*ш*в). Не вызывай, если чего-то не хватает!",
+        parameters=genai.Schema(
+            type=genai.Type.OBJECT,
+            properties={
+                "weight": genai.Schema(type=genai.Type.NUMBER, description="Общий вес груза в КГ (обязательно)."),
+                "product_type": genai.Schema(type=genai.Type.STRING, description="Категория товара (обязательно), например 'мебель', 'одежда', 'техника'. Используй 'общие', если неясно."),
+                "city": genai.Schema(type=genai.Type.STRING, description="Город доставки в Казахстане (обязательно), например 'Астана', 'Алматы', 'Караганда'."),
+                "volume": genai.Schema(type=genai.Type.NUMBER, description="Общий объем груза в м³ (кубических метрах). Указывать ТОЛЬКО если ИЗВЕСТЕН точный объем."),
+                "length": genai.Schema(type=genai.Type.NUMBER, description="Длина ОДНОГО места груза в метрах ИЛИ сантиметрах (если объем неизвестен). Указывать ТОЛЬКО если volume не указан."),
+                "width": genai.Schema(type=genai.Type.NUMBER, description="Ширина ОДНОГО места груза в метрах ИЛИ сантиметрах (если объем неизвестен). Указывать ТОЛЬКО если volume не указан."),
+                "height": genai.Schema(type=genai.Type.NUMBER, description="Высота ОДНОГО места груза в метрах ИЛИ сантиметрах (если объем неизвестен). Указывать ТОЛЬКО если volume не указан.")
+            },
+            required=["weight", "product_type", "city"]
+        )
+    ),
+    # Паспорт 2: Отслеживание Груза
+    genai.FunctionDeclaration(
+        name="track_shipment",
+        description="Отследить груз по трек-номеру и получить его текущий статус, местоположение и маршрут. Требует трек-номер.",
+        parameters=genai.Schema(
+            type=genai.Type.OBJECT,
+            properties={ "track_number": genai.Schema(type=genai.Type.STRING, description="Трек-номер груза (обязательно), например GZ123456, IY789012.") },
+            required=["track_number"]
+        )
+    ),
+     # Паспорт 3: Сохранение Заявки
+    genai.FunctionDeclaration(
+        name="save_application",
+        description="Сохранить заявку клиента в базу данных ПОСЛЕ успешного расчета и ЯВНОГО согласия клиента. Требует имя и телефон.",
+        parameters=genai.Schema(
+            type=genai.Type.OBJECT,
+            properties={
+                "name": genai.Schema(type=genai.Type.STRING, description="Имя клиента (обязательно)."),
+                "phone": genai.Schema(type=genai.Type.STRING, description="Номер телефона клиента (обязательно)."),
+                "details": genai.Schema(type=genai.Type.STRING, description="Краткие детали расчета (опционально, например '50кг мебель в Астану').")
+            },
+            required=["name", "phone"]
+        )
+    ),
+    # Паспорт 4: Статическая Информация
+    genai.FunctionDeclaration(
+        name="get_static_info",
+        description="Получить информацию об условиях оплаты, процедуре доставки или объяснении тарифов.",
+        parameters=genai.Schema(
+            type=genai.Type.OBJECT,
+            properties={
+                "topic": genai.Schema(type=genai.Type.STRING, description="Тема запроса (обязательно): 'оплата', 'тарифы' или 'процедура'.")
+            },
+            required=["topic"]
+        )
+    ),
 ]
 
 # --- 14. ИНИЦИАЛИЗАЦИЯ МОДЕЛИ С ИНСТРУМЕНТАМИ ---
@@ -510,7 +507,7 @@ try:
             model_name=base_model.model_name,
             # Добавляем инструкции и инструменты
             system_instruction=SYSTEM_INSTRUCTION,
-            tools=tools_declaration,
+            tools=function_declarations_list, # <--- ИСПОЛЬЗУЕМ СПИСОК НАПРЯМУЮ
             safety_settings={ # Снижаем порог блокировки для модели с инструментами тоже
                 HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
                 HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
