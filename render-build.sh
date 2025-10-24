@@ -1,0 +1,5 @@
+"#!/bin/bash" 
+"echo '=== CLEARING CACHE AND REINSTALLING ==='" 
+"pip cache purge" 
+"pip uninstall -y google-generativeai" 
+"pip install -r requirements.txt --force-reinstall --no-cache-dir" 
