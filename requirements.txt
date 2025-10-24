@@ -1,7 +1,5 @@
 google-generativeai==0.3.2
-flask==2.3.3
-psycopg2-binary==2.9.7  
-python-dotenv==1.0.0
-gunicorn==21.2.0
-# CACHE-BUST-$(date +%s) 
-# CACHE-BUST-1738080452 
+flask
+psycopg2-binary
+python-dotenv
+gunicorn
