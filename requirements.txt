@@ -1,5 +1,5 @@
 google-generativeai==0.3.2
-flask
-psycopg2-binary
-python-dotenv
-gunicorn
+flask==2.3.3
+psycopg2-binary==2.9.7  
+python-dotenv==1.0.0
+gunicorn==21.2.0
