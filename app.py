@@ -5,7 +5,6 @@ import logging
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, session
 import google.generativeai as genai
-# УБИРАЕМ проблемный импорт
 from dotenv import load_dotenv
 
 # Настройка логирования
@@ -167,13 +166,12 @@ try:
     if GEMINI_API_KEY:
         genai.configure(api_key=GEMINI_API_KEY)
         
-        # Инициализация модели с инструментами и личностью
+        # ИСПРАВЛЕНИЕ: убираем system_instruction из конструктора
         model = genai.GenerativeModel(
             'models/gemini-2.0-flash',
-            tools=tools,
-            system_instruction=AISULU_PROMPT
+            tools=tools  # ← ТОЛЬКО инструменты здесь
         )
-        logger.info("✅ Модель Gemini инициализирована с инструментами и личностью Айсулу")
+        logger.info("✅ Модель Gemini инициализирована с инструментами")
     else:
         logger.warning("⚠️ GEMINI_API_KEY не найден")
 except Exception as e:
@@ -476,8 +474,11 @@ def get_aisulu_response_with_tools(user_message):
         return "🤖 Сервис временно недоступен. Пожалуйста, попробуйте позже."
     
     try:
-        # Простой вызов - модель уже знает инструменты и личность
-        response = model.generate_content(user_message)
+        # ИСПРАВЛЕНИЕ: передаем system_instruction в generate_content()
+        response = model.generate_content(
+            user_message,
+            system_instruction=AISULU_PROMPT  # ← Личность Айсулу здесь
+        )
         
         # Проверяем, есть ли вызов функции в ответе
         if hasattr(response, 'candidates') and response.candidates:
@@ -496,7 +497,6 @@ def get_aisulu_response_with_tools(user_message):
                             dict(function_call.args)
                         )
                         
-                        # ИСПРАВЛЕНИЕ: используем альтернативный подход без Part
                         # Создаем контент с результатом для обратного вызова
                         function_response_content = {
                             "role": "function",
@@ -508,12 +508,15 @@ def get_aisulu_response_with_tools(user_message):
                             }]
                         }
                         
-                        # Отправляем всю историю обратно в Gemini
-                        final_response = model.generate_content([
-                            user_message,
-                            candidate.content,
-                            function_response_content
-                        ])
+                        # ИСПРАВЛЕНИЕ: передаем system_instruction во втором вызове тоже
+                        final_response = model.generate_content(
+                            [
+                                user_message,
+                                candidate.content,
+                                function_response_content
+                            ],
+                            system_instruction=AISULU_PROMPT  # ← И здесь тоже
+                        )
                         
                         return final_response.text if final_response.text else "Ой, что-то пошло не так! 😅"
         
