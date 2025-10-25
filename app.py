@@ -59,103 +59,108 @@ else:
     EXCHANGE_RATE, DESTINATION_ZONES, T1_RATES_DENSITY, T2_RATES, T2_RATES_DETAILED, PRODUCT_CATEGORIES = 550, {}, {}, {}, {}, {}
 
 # ===== ИНСТРУМЕНТЫ ДЛЯ GEMINI =====
+# ИСПРАВЛЕНИЕ: все функции в одном инструменте
 tools = [
     {
-        "name": "calculate_delivery_cost",
-        "description": "Рассчитать стоимость доставки из Китая в Казахстан по нашим тарифам",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "weight_kg": {
-                    "type": "number", 
-                    "description": "Общий вес груза в килограммах"
-                },
-                "city": {
-                    "type": "string", 
-                    "description": "Город доставки в Казахстане: Алматы, Астана, Шымкент и др."
-                },
-                "product_type": {
-                    "type": "string", 
-                    "description": "Тип товара: одежда, мебель, техника, косметика, автозапчасти и т.д."
-                },
-                "volume_m3": {
-                    "type": "number", 
-                    "description": "Объем груза в кубических метрах"
-                },
-                "length_m": {
-                    "type": "number", 
-                    "description": "Длина груза в метрах"
-                },
-                "width_m": {
-                    "type": "number", 
-                    "description": "Ширина груза в метрах"
-                },
-                "height_m": {
-                    "type": "number", 
-                    "description": "Высота груза в метрах"
+        "function_declarations": [
+            {
+                "name": "calculate_delivery_cost",
+                "description": "Рассчитать стоимость доставки из Китая в Казахстан по нашим тарифам",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "weight_kg": {
+                            "type": "number", 
+                            "description": "Общий вес груза в килограммах"
+                        },
+                        "city": {
+                            "type": "string", 
+                            "description": "Город доставки в Казахстане: Алматы, Астана, Шымкент и др."
+                        },
+                        "product_type": {
+                            "type": "string", 
+                            "description": "Тип товара: одежда, мебель, техника, косметика, автозапчасти и т.д."
+                        },
+                        "volume_m3": {
+                            "type": "number", 
+                            "description": "Объем груза в кубических метрах"
+                        },
+                        "length_m": {
+                            "type": "number", 
+                            "description": "Длина груза в метрах"
+                        },
+                        "width_m": {
+                            "type": "number", 
+                            "description": "Ширина груза в метрах"
+                        },
+                        "height_m": {
+                            "type": "number", 
+                            "description": "Высота груза в метрах"
+                        }
+                    },
+                    "required": ["weight_kg", "city", "product_type"]
                 }
             },
-            "required": ["weight_kg", "city", "product_type"]
-        }
-    },
-    {
-        "name": "track_shipment",
-        "description": "Отследить статус груза по трек-номеру",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "tracking_number": {
-                    "type": "string", 
-                    "description": "Трек-номер груза (начинается с GZ, IY, SZ)"
+            {
+                "name": "track_shipment",
+                "description": "Отследить статус груза по трек-номеру",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "tracking_number": {
+                            "type": "string", 
+                            "description": "Трек-номер груза (начинается с GZ, IY, SZ)"
+                        }
+                    },
+                    "required": ["tracking_number"]
                 }
             },
-            "required": ["tracking_number"]
-        }
-    },
-    {
-        "name": "get_delivery_terms",
-        "description": "Получить информацию о сроках доставки",
-        "parameters": {
-            "type": "object", 
-            "properties": {
-                "warehouse": {
-                    "type": "string",
-                    "description": "Склад отправки: Гуанчжоу, Иу"
+            {
+                "name": "get_delivery_terms",
+                "description": "Получить информацию о сроках доставки",
+                "parameters": {
+                    "type": "object", 
+                    "properties": {
+                        "warehouse": {
+                            "type": "string",
+                            "description": "Склад отправки: Гуанчжоу, Иу"
+                        }
+                    },
+                    "required": []
                 }
             },
-            "required": []
-        }
-    },
-    {
-        "name": "get_payment_methods", 
-        "description": "Получить список доступных способов оплаты",
-        "parameters": {
-            "type": "object",
-            "properties": {},
-            "required": []
-        }
-    },
-    {
-        "name": "save_customer_application",
-        "description": "Сохранить заявку клиента для обратного звонка",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Имя клиента"
-                },
-                "phone": {
-                    "type": "string", 
-                    "description": "Телефон клиента (10-11 цифр)"
-                },
-                "details": {
-                    "type": "string",
-                    "description": "Дополнительная информация о заявке"
+            {
+                "name": "get_payment_methods", 
+                "description": "Получить список доступных способов оплаты",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
                 }
             },
-            "required": ["name", "phone"]
-        }
+            {
+                "name": "save_customer_application",
+                "description": "Сохранить заявку клиента для обратного звонка",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Имя клиента"
+                        },
+                        "phone": {
+                            "type": "string", 
+                            "description": "Телефон клиента (10-11 цифр)"
+                        },
+                        "details": {
+                            "type": "string",
+                            "description": "Дополнительная информация о заявке"
+                        }
+                    },
+                    "required": ["name", "phone"]
+                }
+            }
+        ]
     }
 ]
 
@@ -166,10 +171,10 @@ try:
     if GEMINI_API_KEY:
         genai.configure(api_key=GEMINI_API_KEY)
         
-        # ИСПРАВЛЕНИЕ: убираем system_instruction из конструктора
+        # Инициализация модели с инструментами
         model = genai.GenerativeModel(
             'models/gemini-2.0-flash',
-            tools=tools  # ← ТОЛЬКО инструменты здесь
+            tools=tools
         )
         logger.info("✅ Модель Gemini инициализирована с инструментами")
     else:
@@ -474,10 +479,10 @@ def get_aisulu_response_with_tools(user_message):
         return "🤖 Сервис временно недоступен. Пожалуйста, попробуйте позже."
     
     try:
-        # ИСПРАВЛЕНИЕ: передаем system_instruction в generate_content()
+        # Передаем system_instruction в generate_content()
         response = model.generate_content(
             user_message,
-            system_instruction=AISULU_PROMPT  # ← Личность Айсулу здесь
+            system_instruction=AISULU_PROMPT
         )
         
         # Проверяем, есть ли вызов функции в ответе
@@ -508,14 +513,14 @@ def get_aisulu_response_with_tools(user_message):
                             }]
                         }
                         
-                        # ИСПРАВЛЕНИЕ: передаем system_instruction во втором вызове тоже
+                        # Передаем system_instruction во втором вызове тоже
                         final_response = model.generate_content(
                             [
                                 user_message,
                                 candidate.content,
                                 function_response_content
                             ],
-                            system_instruction=AISULU_PROMPT  # ← И здесь тоже
+                            system_instruction=AISULU_PROMPT
                         )
                         
                         return final_response.text if final_response.text else "Ой, что-то пошло не так! 😅"
