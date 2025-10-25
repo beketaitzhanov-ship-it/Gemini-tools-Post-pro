@@ -431,31 +431,57 @@ def get_aisulu_response_with_tools(user_message):
         return "🤖 Сервис временно недоступен. Пожалуйста, попробуйте позже."
     
     try:
-        # ИСПРАВЛЕНИЕ: используем историю диалога для контекста
+        # Получаем историю диалога
         chat_history = session.get('chat_history', [])
         
-        # Собираем весь контекст для Gemini
+        # Создаем структурированные сообщения для Gemini
         messages = []
         
-        # Добавляем системный промпт
-        messages.append(AISULU_PROMPT)
+        # 1. Добавляем системный промпт как первое сообщение
+        messages.append({
+            "role": "user",
+            "parts": [{"text": AISULU_PROMPT}]
+        })
         
-        # Добавляем историю диалога
-        for message in chat_history[-6:]:  # берем последние 6 сообщений
-            messages.append(message)
+        # 2. Добавляем историю диалога в правильном формате
+        for i in range(0, len(chat_history), 2):
+            if i < len(chat_history):
+                # Сообщение пользователя (исправляем префикс)
+                user_msg = chat_history[i]
+                if user_msg.startswith("Пользователь: "):
+                    messages.append({
+                        "role": "user", 
+                        "parts": [{"text": user_msg[14:]}]
+                    })
+                # ИЛИ если используется "Клиент: " (8 символов)
+                elif user_msg.startswith("Клиент: "):
+                    messages.append({
+                        "role": "user", 
+                        "parts": [{"text": user_msg[8:]}]
+                    })
+            
+            if i + 1 < len(chat_history):
+                # Ответ Айсулу
+                assistant_msg = chat_history[i + 1]
+                if assistant_msg.startswith("Айсулу: "):
+                    messages.append({
+                        "role": "model",
+                        "parts": [{"text": assistant_msg[8:]}]
+                    })
         
-        # Добавляем текущее сообщение пользователя
-        messages.append(user_message)
+        # 3. Добавляем текущее сообщение пользователя
+        messages.append({
+            "role": "user",
+            "parts": [{"text": user_message}]
+        })
         
-        # Объединяем все в один промпт
-        full_prompt = "\n\n".join(messages)
+        # Исправляем GenerationConfig на словарь
+        generation_config = {'temperature': 0.7}
         
-        # Передаем system_instruction в generate_content()
+        # Передаем структурированные сообщения в модель
         response = model.generate_content(
-            full_prompt,
-            generation_config=genai.types.GenerationConfig(
-                temperature=0.7
-            )
+            messages,
+            generation_config=generation_config
         )
         
         # Проверяем, есть ли вызов функции в ответе
@@ -476,7 +502,7 @@ def get_aisulu_response_with_tools(user_message):
                         )
                         
                         # Создаем контент с результатом для обратного вызова
-                        function_response_content = {
+                        function_response = {
                             "role": "function",
                             "parts": [{
                                 "function_response": {
@@ -486,16 +512,12 @@ def get_aisulu_response_with_tools(user_message):
                             }]
                         }
                         
-                        # Передаем system_instruction во втором вызове с историей
+                        # Добавляем результат функции в историю и делаем финальный запрос
+                        updated_messages = messages + [candidate.content, function_response]
+                        
                         final_response = model.generate_content(
-                            [
-                                full_prompt,
-                                candidate.content,
-                                function_response_content
-                            ],
-                            generation_config=genai.types.GenerationConfig(
-                                temperature=0.7
-                            )
+                            updated_messages,
+                            generation_config=generation_config
                         )
                         
                         final_text = final_response.text if final_response.text else "Ой, что-то пошло не так! 😅"
@@ -550,7 +572,7 @@ def chat():
         # ВСЁ остальное обрабатываем через AI-first архитектуру
         response = get_aisulu_response_with_tools(user_message)
 
-        # ИСПРАВЛЕНИЕ: сохраняем в историю с правильным форматом
+        # ИСПРАВЛЕНИЕ: сохраняем в историю с ЕДИНЫМ форматом префиксов
         session['chat_history'].append(f"Пользователь: {user_message}")
         session['chat_history'].append(f"Айсулу: {response}")
         
