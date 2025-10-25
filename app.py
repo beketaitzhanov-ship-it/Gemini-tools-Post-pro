@@ -5,8 +5,10 @@ import logging
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, session
 import google.generativeai as genai
-# ИСПРАВЛЕНИЕ: Добавляем импорт protos
+# ИСПРАВЛЕНИЕ: Оставляем 'types' для to_dict
 import google.generativeai.types as genai_types
+# ИСПРАВЛЕНИЕ: Убираем 'protos'
+# from google.generativeai import protos # <--- УДАЛЕНО
 from dotenv import load_dotenv
 
 # Настройка логирования
@@ -61,62 +63,98 @@ else:
     EXCHANGE_RATE, DESTINATION_ZONES, T1_RATES_DENSITY, T2_RATES, T2_RATES_DETAILED, PRODUCT_CATEGORIES = 550, {}, {}, {}, {}, {}
 
 # ===== ИНСТРУМЕНТЫ ДЛЯ GEMINI =====
-# ИСПРАВЛЕНИЕ: используем правильный формат через genai.protos с type_
+# ИСПРАВЛЕНИЕ: Используем 'type' В ВЕРХНЕМ РЕГИСТРЕ для надежности
 tools = [
-    genai.protos.Tool(
-        function_declarations=[
-            genai.protos.FunctionDeclaration(
-                name="calculate_delivery_cost",
-                description="Рассчитать стоимость доставки из Китая в Казахстан по нашим тарифам",
-                parameters=genai.protos.Schema(
-                    type_=genai.protos.Type.OBJECT,
-                    properties={
-                        "weight_kg": genai.protos.Schema(type_=genai.protos.Type.NUMBER, description="Общий вес груза в килограммах"),
-                        "city": genai.protos.Schema(type_=genai.protos.Type.STRING, description="Город доставки в Казахстане: Алматы, Астана, Шымкент и др."),
-                        "product_type": genai.protos.Schema(type_=genai.protos.Type.STRING, description="Тип товара: одежда, мебель, техника, косметика, автозапчасти и т.д."),
-                        "volume_m3": genai.protos.Schema(type_=genai.protos.Type.NUMBER, description="Объем груза в кубических метрах"),
-                        "length_m": genai.protos.Schema(type_=genai.protos.Type.NUMBER, description="Длина груза в метрах"),
-                        "width_m": genai.protos.Schema(type_=genai.protos.Type.NUMBER, description="Ширина груза в метрах"),
-                        "height_m": genai.protos.Schema(type_=genai.protos.Type.NUMBER, description="Высота груза в метрах")
+    {
+        "function_declarations": [
+            {
+                "name": "calculate_delivery_cost",
+                "description": "Рассчитать стоимость доставки из Китая в Казахстан по нашим тарифам",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "weight_kg": {
+                            "type": "NUMBER",
+                            "description": "Общий вес груза в килограммах"
+                        },
+                        "city": {
+                            "type": "STRING",
+                            "description": "Город доставки в Казахстане: Алматы, Астана, Шымкент и др."
+                        },
+                        "product_type": {
+                            "type": "STRING",
+                            "description": "Тип товара: одежда, мебель, техника, косметика, автозапчасти и т.д."
+                        },
+                        "volume_m3": {
+                            "type": "NUMBER",
+                            "description": "Объем груза в кубических метрах"
+                        },
+                        "length_m": {
+                            "type": "NUMBER",
+                            "description": "Длина груза в метрах"
+                        },
+                        "width_m": {
+                            "type": "NUMBER",
+                            "description": "Ширина груза в метрах"
+                        },
+                        "height_m": {
+                            "type": "NUMBER",
+                            "description": "Высота груза в метрах"
+                        }
                     },
-                    required=["weight_kg", "city", "product_type"]
-                )
-            ),
-            genai.protos.FunctionDeclaration(
-                name="track_shipment",
-                description="Отследить статус груза по трек-номеру",
-                parameters=genai.protos.Schema(
-                    type_=genai.protos.Type.OBJECT,
-                    properties={
-                        "tracking_number": genai.protos.Schema(type_=genai.protos.Type.STRING, description="Трек-номер груза (начинается с GZ, IY, SZ)")
+                    "required": ["weight_kg", "city", "product_type"]
+                }
+            },
+            {
+                "name": "track_shipment",
+                "description": "Отследить статус груза по трек-номеру",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "tracking_number": {
+                            "type": "STRING",
+                            "description": "Трек-номер груза (начинается с GZ, IY, SZ)"
+                        }
                     },
-                    required=["tracking_number"]
-                )
-            ),
-            genai.protos.FunctionDeclaration(
-                name="get_delivery_terms",
-                description="Получить информацию о сроках доставки"
-            ),
-            genai.protos.FunctionDeclaration(
-                name="get_payment_methods", 
-                description="Получить список доступных способов оплаты"
-            ),
-            genai.protos.FunctionDeclaration(
-                name="save_customer_application",
-                description="Сохранить заявку клиента для обратного звонка",
-                parameters=genai.protos.Schema(
-                    type_=genai.protos.Type.OBJECT,
-                    properties={
-                        "name": genai.protos.Schema(type_=genai.protos.Type.STRING, description="Имя клиента"),
-                        "phone": genai.protos.Schema(type_=genai.protos.Type.STRING, description="Телефон клиента (10-11 цифр)"),
-                        "details": genai.protos.Schema(type_=genai.protos.Type.STRING, description="Дополнительная информация о заявке")
+                    "required": ["tracking_number"]
+                }
+            },
+            {
+                "name": "get_delivery_terms",
+                "description": "Получить информацию о сроках доставки"
+                # (без параметров)
+            },
+            {
+                "name": "get_payment_methods",
+                "description": "Получить список доступных способов оплаты"
+                # (без параметров)
+            },
+            {
+                "name": "save_customer_application",
+                "description": "Сохранить заявку клиента для обратного звонка",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "name": {
+                            "type": "STRING",
+                            "description": "Имя клиента"
+                        },
+                        "phone": {
+                            "type": "STRING",
+                            "description": "Телефон клиента (10-11 цифр)"
+                        },
+                        "details": {
+                            "type": "STRING",
+                            "description": "Дополнительная информация о заявке"
+                        }
                     },
-                    required=["name", "phone"]
-                )
-            )
+                    "required": ["name", "phone"]
+                }
+            }
         ]
-    )
+    }
 ]
+
 
 # ===== ИНИЦИАЛИЗАЦИЯ GEMINI =====
 model = None
@@ -125,10 +163,10 @@ try:
     if GEMINI_API_KEY:
         genai.configure(api_key=GEMINI_API_KEY)
         
-        # ИСПРАВЛЕНИЕ: Инициализируем модель с правильным именем
+        # Инициализируем модель с правильным именем
         model = genai.GenerativeModel(
             'models/gemini-2.0-flash', 
-            tools=tools
+            tools=tools # Теперь 'tools' - это простой словарь
         )
         logger.info("✅ Модель Gemini инициализирована с инструментами")
     else:
@@ -349,7 +387,7 @@ def execute_tool_function(function_name, parameters):
         logger.error(f"❌ Ошибка выполнения инструмента {function_name}: {e}")
         return {"error": f"Ошибка выполнения: {str(e)}"}
 
-# ===== ИСПРАВЛЕНИЕ ОШИБКИ 'function_response' И АМНЕЗИИ: НОВАЯ ФУНКЦИЯ =====
+# ===== ЛОГИКА С ПАМЯТЬЮ И ОБРАБОТКОЙ (остается без изменений) =====
 def get_aisulu_response_with_tools(user_message):
     """Основная функция получения ответа от Айсулу с инструментами (С ПАМЯТЬЮ)"""
     if not model:
