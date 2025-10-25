@@ -59,7 +59,7 @@ else:
     EXCHANGE_RATE, DESTINATION_ZONES, T1_RATES_DENSITY, T2_RATES, T2_RATES_DETAILED, PRODUCT_CATEGORIES = 550, {}, {}, {}, {}, {}
 
 # ===== ИНСТРУМЕНТЫ ДЛЯ GEMINI =====
-# ИСПРАВЛЕНИЕ: все функции в одном инструменте
+# ИСПРАВЛЕНИЕ: убрал parameters для функций без параметров
 tools = [
     {
         "function_declarations": [
@@ -117,26 +117,13 @@ tools = [
             },
             {
                 "name": "get_delivery_terms",
-                "description": "Получить информацию о сроках доставки",
-                "parameters": {
-                    "type": "object", 
-                    "properties": {
-                        "warehouse": {
-                            "type": "string",
-                            "description": "Склад отправки: Гуанчжоу, Иу"
-                        }
-                    },
-                    "required": []
-                }
+                "description": "Получить информацию о сроках доставки"
+                # ИСПРАВЛЕНИЕ: убрал parameters для функции без параметров
             },
             {
                 "name": "get_payment_methods", 
-                "description": "Получить список доступных способов оплаты",
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                    "required": []
-                }
+                "description": "Получить список доступных способов оплаты"
+                # ИСПРАВЛЕНИЕ: убрал parameters для функции без параметров
             },
             {
                 "name": "save_customer_application",
