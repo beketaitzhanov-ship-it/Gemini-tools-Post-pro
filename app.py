@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
-# Model: models/gemini-2.0-flash
 import os
-import re
 import json
 import logging
 from datetime import datetime, timedelta
@@ -23,7 +21,7 @@ app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'postpro-secret-key-2024')
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30)
 
-# ===== ЗАГРУЗКА КОНФИГУРАЦИИ И ПРОМПТА =====
+# ===== ЗАГРУЗКА КОНФИГУРАЦИИ =====
 def load_config():
     """Загружает конфигурацию из файла config.json."""
     try:
@@ -56,183 +54,125 @@ if config:
     T2_RATES = config.get("T2_RATES", {})
     T2_RATES_DETAILED = config.get("T2_RATES_DETAILED", {})
     PRODUCT_CATEGORIES = config.get("PRODUCT_CATEGORIES", {})
-    GREETINGS = config.get("GREETINGS", [])
 else:
     logger.error("⚠️ Приложение запускается с значениями по умолчанию")
-    EXCHANGE_RATE, DESTINATION_ZONES, T1_RATES_DENSITY, T2_RATES, T2_RATES_DETAILED, PRODUCT_CATEGORIES, GREETINGS = 550, {}, {}, {}, {}, {}, []
+    EXCHANGE_RATE, DESTINATION_ZONES, T1_RATES_DENSITY, T2_RATES, T2_RATES_DETAILED, PRODUCT_CATEGORIES = 550, {}, {}, {}, {}, {}
 
-# ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
-def detect_delivery_mode(message):
-    """Определяет, нужно ли переключиться в режим доставки"""
-    text_lower = message.lower()
-    
-    # Признаки режима доставки
-    delivery_keywords = ['доставка', 'груз', 'посчитай', 'расчёт', 'тариф', 'логистика', 'стоимость', 'сколько стоит']
-    has_delivery_keywords = any(keyword in text_lower for keyword in delivery_keywords)
-    
-    # Цифры с единицами измерения
-    has_measurements = bool(re.search(r'\d+\s*(?:кг|kg|м|m|см|cm|куб|м³|×|х|x)', text_lower))
-    
-    # Города Казахстана
-    has_cities = any(city in text_lower for city in DESTINATION_ZONES.keys())
-    
-    return has_delivery_keywords or has_measurements or has_cities
+# ===== ИНИЦИАЛИЗАЦИЯ GEMINI =====
+model = None
 
-def get_aisulu_prompt(user_message, context=""):
-    """Создает промпт для Айсулу с учетом режима"""
-    delivery_mode = detect_delivery_mode(user_message)
-    
-    base_prompt = AISULU_PROMPT or """
-Ты - Айсулу, весёлый и энергичный ИИ-помощник из Казахстана. 
-Отвечай дружелюбно, с казахским колоритом, используй эмодзи.
-"""
-    
-    prompt = f"""
-{base_prompt}
+try:
+    if GEMINI_API_KEY:
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel('models/gemini-2.0-flash')
+        logger.info("✅ Модель Gemini инициализирована")
+    else:
+        logger.warning("⚠️ GEMINI_API_KEY не найден")
+except Exception as e:
+    logger.error(f"❌ Ошибка инициализации Gemini: {e}")
 
-Текущий режим: {"📦 РЕЖИМ ДОСТАВКИ" if delivery_mode else "💬 ОБЫЧНОЕ ОБЩЕНИЕ"}
+# ===== ИНСТРУМЕНТЫ ДЛЯ GEMINI =====
+tools = [
+    {
+        "name": "calculate_delivery_cost",
+        "description": "Рассчитать стоимость доставки из Китая в Казахстан по нашим тарифам",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "weight_kg": {
+                    "type": "number", 
+                    "description": "Общий вес груза в килограммах"
+                },
+                "city": {
+                    "type": "string", 
+                    "description": "Город доставки в Казахстане: Алматы, Астана, Шымкент и др."
+                },
+                "product_type": {
+                    "type": "string", 
+                    "description": "Тип товара: одежда, мебель, техника, косметика, автозапчасти и т.д."
+                },
+                "volume_m3": {
+                    "type": "number", 
+                    "description": "Объем груза в кубических метрах"
+                },
+                "length_m": {
+                    "type": "number", 
+                    "description": "Длина груза в метрах"
+                },
+                "width_m": {
+                    "type": "number", 
+                    "description": "Ширина груза в метрах"
+                },
+                "height_m": {
+                    "type": "number", 
+                    "description": "Высота груза в метрах"
+                }
+            },
+            "required": ["weight_kg", "city", "product_type"]
+        }
+    },
+    {
+        "name": "track_shipment",
+        "description": "Отследить статус груза по трек-номеру",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "tracking_number": {
+                    "type": "string", 
+                    "description": "Трек-номер груза (начинается с GZ, IY, SZ)"
+                }
+            },
+            "required": ["tracking_number"]
+        }
+    },
+    {
+        "name": "get_delivery_terms",
+        "description": "Получить информацию о сроках доставки",
+        "parameters": {
+            "type": "object", 
+            "properties": {
+                "warehouse": {
+                    "type": "string",
+                    "description": "Склад отправки: Гуанчжоу, Иу"
+                }
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "get_payment_methods", 
+        "description": "Получить список доступных способов оплаты",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
+    {
+        "name": "save_customer_application",
+        "description": "Сохранить заявку клиента для обратного звонка",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Имя клиента"
+                },
+                "phone": {
+                    "type": "string", 
+                    "description": "Телефон клиента (10-11 цифр)"
+                },
+                "details": {
+                    "type": "string",
+                    "description": "Дополнительная информация о заявке"
+                }
+            },
+            "required": ["name", "phone"]
+        }
+    }
+]
 
-Контекст предыдущего разговора:
-{context}
-
-Сообщение пользователя: {user_message}
-
-Помни: Ты Айсулу - настоящая казахская девушка с большим сердцем! 
-Отвечай соответственно своему характеру и текущему режиму.
-"""
-    return prompt
-
-# [ОСТАЛЬНЫЕ ФУНКЦИИ ОСТАЮТСЯ БЕЗ ИЗМЕНЕНИЙ - extract_weight, extract_city, find_product_category и т.д.]
-
-def extract_dimensions(text):
-    """Извлекает габариты из текста"""
-    patterns = [
-        r'(\d+(?:[.,]\d+)?)\s*[xх*×]\s*(\d+(?:[.,]\d+)?)\s*[xх*×]\s*(\d+(?:[.,]\d+)?)',
-        r'(\d+(?:[.,]\d+)?)\s*(?:см|cm|м|m)\s*[xх*×]\s*(\d+(?:[.,]\d+)?)\s*(?:см|cm|м|m)\s*[xх*×]\s*(\d+(?:[.,]\d+)?)\s*(?:см|cm|м|m)'
-    ]
-    
-    text_lower = text.lower()
-    for pattern in patterns:
-        match = re.search(pattern, text_lower)
-        if match:
-            try:
-                l, w, h = [float(x.replace(',', '.')) for x in match.groups()]
-                # Конвертация см в метры если нужно
-                if l > 10 or w > 10 or h > 10:
-                    l, w, h = l/100, w/100, h/100
-                return l, w, h
-            except:
-                continue
-    return None, None, None
-
-def extract_volume(text):
-    """Извлекает объем из текста"""
-    patterns = [
-        r'(\d+(?:[.,]\d+)?)\s*(?:куб|м³|м3|м\^3)',
-        r'объем\w*\s*(\d+(?:[.,]\d+)?)'
-    ]
-    
-    text_lower = text.lower()
-    for pattern in patterns:
-        match = re.search(pattern, text_lower)
-        if match:
-            try:
-                return float(match.group(1).replace(',', '.'))
-            except:
-                continue
-    return None
-
-def extract_weight(text):
-    """Извлекает вес из текста"""
-    patterns = [
-        r'(\d+(?:[.,]\d+)?)\s*(?:кг|kg|килограмм)',
-        r'вес\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(?:кг)?',
-        r'(\d+(?:[.,]\d+)?)\s*(?:т|тонн|тонны)'
-    ]
-    
-    text_lower = text.lower()
-    for pattern in patterns:
-        match = re.search(pattern, text_lower)
-        if match:
-            try:
-                weight = float(match.group(1).replace(',', '.'))
-                # Конвертация тонн в кг
-                if 'т' in pattern or 'тонн' in pattern:
-                    weight *= 1000
-                return weight
-            except:
-                continue
-    return None
-
-def extract_city(text):
-    """Извлекает город из текста"""
-    text_lower = text.lower()
-    for city in DESTINATION_ZONES.keys():
-        if city in text_lower:
-            return city
-    return None
-
-def extract_boxes_from_message(message):
-    """Извлекает информацию о коробках"""
-    boxes = []
-    try:
-        text_lower = message.lower()
-        
-        # Паттерн: "N коробок по X кг"
-        pattern = r'(\d+)\s*(?:коробк|посылк|упаковк|шт|штук)\w*\s+по\s+(\d+(?:[.,]\d+)?)\s*кг'
-        matches = re.findall(pattern, text_lower)
-        
-        for count, weight in matches:
-            box_count = int(count)
-            box_weight = float(weight.replace(',', '.'))
-            
-            for i in range(box_count):
-                boxes.append({
-                    'weight': box_weight,
-                    'product_type': None,
-                    'volume': None,
-                    'description': f"Коробка {i+1}"
-                })
-        
-        return boxes
-    except Exception as e:
-        logger.error(f"Ошибка извлечения коробок: {e}")
-        return []
-
-def extract_pallets_from_message(message):
-    """Извлекает информацию о паллетах"""
-    try:
-        text_lower = message.lower()
-        
-        # Паттерн: "N паллет"
-        pallet_match = re.search(r'(\d+)\s*паллет\w*', text_lower)
-        if pallet_match:
-            pallet_count = int(pallet_match.group(1))
-            
-            # Стандартные параметры паллета
-            STANDARD_PALLET = {
-                'weight': 500,  # кг
-                'volume': 1.2,  # м³
-                'description': 'Стандартная паллета'
-            }
-            
-            pallets = []
-            for i in range(pallet_count):
-                pallets.append({
-                    'weight': STANDARD_PALLET['weight'],
-                    'volume': STANDARD_PALLET['volume'],
-                    'product_type': 'мебель',  # по умолчанию для паллет
-                    'description': f'Паллета {i+1}'
-                })
-            
-            return pallets
-        
-        return []
-    except Exception as e:
-        logger.error(f"Ошибка извлечения паллет: {e}")
-        return []
-
-# ===== ФУНКЦИИ РАСЧЕТА СТОИМОСТИ =====
+# ===== ФУНКЦИИ-ОБРАБОТЧИКИ ИНСТРУМЕНТОВ =====
 def find_product_category(text):
     """Находит категорию товара по тексту"""
     if not text:
@@ -252,16 +192,14 @@ def find_destination_zone(city_name):
     
     city_lower = city_name.lower()
     
-    # Прямой поиск
     if city_lower in DESTINATION_ZONES:
         return DESTINATION_ZONES[city_lower]
     
-    # Поиск по вхождению
     for city, zone in DESTINATION_ZONES.items():
         if city in city_lower or city_lower in city:
             return zone
     
-    return "5"  # зона по умолчанию
+    return "5"
 
 def get_t1_rate_from_db(product_type, weight, volume):
     """Получает тариф Т1 из конфига"""
@@ -287,7 +225,6 @@ def get_t2_cost_from_db(weight, zone):
         if zone == "алматы":
             return weight * T2_RATES.get("алматы", 250)
         
-        # Используем детальные тарифы если доступны
         t2_detailed = T2_RATES_DETAILED.get("large_parcel", {})
         weight_ranges = t2_detailed.get("weight_ranges", [])
         extra_rates = t2_detailed.get("extra_kg_rate", {})
@@ -295,7 +232,6 @@ def get_t2_cost_from_db(weight, zone):
         if weight_ranges and extra_rates:
             extra_rate = extra_rates.get(zone, 300)
             
-            # Находим базовую стоимость
             base_cost = 0
             remaining_weight = weight
             
@@ -308,13 +244,11 @@ def get_t2_cost_from_db(weight, zone):
                     base_cost = weight_range["zones"][zone]
                     remaining_weight = weight - 20
             
-            # Добавляем стоимость дополнительных кг
             if remaining_weight > 0:
                 base_cost += remaining_weight * extra_rate
             
             return base_cost
         else:
-            # Резервный расчет
             return weight * T2_RATES.get(zone, 300)
             
     except Exception as e:
@@ -324,221 +258,91 @@ def get_t2_cost_from_db(weight, zone):
 def calculate_quick_cost(weight, product_type, city, volume=None, length=None, width=None, height=None):
     """Основная функция расчета стоимости"""
     try:
-        # Расчет объема если предоставлены габариты
         if not volume and length and width and height:
             volume = length * width * height
         
         if not volume or volume <= 0:
-            return None
+            return {"error": "Не удалось рассчитать объем"}
         
-        # Получаем тариф Т1
         rule, density = get_t1_rate_from_db(product_type, weight, volume)
         if not rule:
-            return None
+            return {"error": "Не найден подходящий тариф"}
         
         price = rule['price']
         unit = rule['unit']
         
-        # Расчет стоимости Т1
         if unit == "kg":
             cost_usd = price * weight
-        else:  # m3
+        else:
             cost_usd = price * volume
         
-        t1_cost_kzt = cost_usd * EXCHANGE_RATE
+        current_rate = EXCHANGE_RATE
+        t1_cost_kzt = cost_usd * current_rate
         
-        # Получаем зону и рассчитываем Т2
         zone = find_destination_zone(city)
         if not zone:
-            return None
+            return {"error": "Город не найден в зонах доставки"}
         
         t2_cost_kzt = get_t2_cost_from_db(weight, str(zone))
         
-        # Итоговая стоимость с комиссией 20%
         total_cost = (t1_cost_kzt + t2_cost_kzt) * 1.20
         
         return {
-            't1_cost': t1_cost_kzt,
-            't2_cost': t2_cost_kzt,
-            'total': total_cost,
+            'success': True,
+            't1_cost_kzt': t1_cost_kzt,
+            't2_cost_kzt': t2_cost_kzt,
+            'total_cost_kzt': total_cost,
             'zone': f"зона {zone}" if zone != "алматы" else "алматы",
-            'volume': volume,
-            'density': density,
-            'rule': rule,
+            'volume_m3': volume,
+            'density_kg_m3': density,
             't1_cost_usd': cost_usd,
             'product_type': product_type,
             'city': city,
-            'weight': weight
+            'weight_kg': weight
         }
         
     except Exception as e:
         logger.error(f"Ошибка расчета стоимости: {e}")
-        return None
+        return {"error": f"Ошибка расчета: {str(e)}"}
 
-def calculate_detailed_cost(quick_cost, weight, product_type, city):
-    """Детальный расчет с разбивкой"""
-    if not quick_cost:
-        return "❌ Ошибка расчета"
-    
-    t1_cost = quick_cost['t1_cost']
-    t2_cost = quick_cost['t2_cost']
-    zone = quick_cost['zone']
-    volume = quick_cost['volume']
-    density = quick_cost['density']
-    rule = quick_cost['rule']
-    t1_cost_usd = quick_cost['t1_cost_usd']
-    
-    price = rule['price']
-    unit = rule['unit']
-    
-    if unit == "kg":
-        calculation_text = f"${price}/кг × {weight} кг = ${t1_cost_usd:.2f} USD"
-    else:
-        calculation_text = f"${price}/м³ × {volume:.3f} м³ = ${t1_cost_usd:.2f} USD"
-    
-    response = f"""
-🎯 **Айсулу рассчитала доставку для {weight} кг «{product_type}» в {city.capitalize()}!** 🌸
-
-📊 **Детальный расчет:**
-
-**🚛 Т1: Доставка из Китая до Алматы**
-• Плотность груза: **{density:.1f} кг/м³**
-• Применен тариф: **${price} за {unit}**
-• Расчет: {calculation_text}
-• В тенге: **{t1_cost:.0f} ₸**
-
-**🚚 Т2: Доставка до двери ({zone})**
-• Прогрессивный тариф = **{t2_cost:.0f} ₸**
-
-**💼 Комиссия компании (20%):**
-• ({t1_cost:.0f} + {t2_cost:.0f}) × 20% = **{(t1_cost + t2_cost) * 0.20:.0f} ₸**
-
-------------------------------------
-💰 **ИТОГО с доставкой до двери:** ≈ **{quick_cost['total']:,.0f} ₸**
-
-💡 *Ваш груз помчится через Хоргос быстрее, чем новости по аулу!* 😄
-
-📞 **Оставить заявку?** Напишите ваше имя и телефон!
-🔄 **Новый расчет?** Напишите **"Старт"**
-    """
-    
-    return response
-
-# ===== GEMINI ИНИЦИАЛИЗАЦИЯ =====
-model = None
-
-try:
-    if GEMINI_API_KEY:
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('models/gemini-2.0-flash')
-        logger.info("✅ Модель Gemini инициализирована")
-        
-except Exception as e:
-    logger.error(f"❌ Ошибка инициализации Gemini: {e}")
-
-def get_gemini_response(user_message, context=""):
-    """Получает ответ от Gemini с личностью Айсулу"""
-    if not model:
-        return "🤖 Сервис временно недоступен."
-    
+def process_tracking_request(tracking_number):
+    """Обрабатывает запросы на отслеживание"""
     try:
-        prompt = get_aisulu_prompt(user_message, context)
+        track_data = {}
+        try:
+            with open('guangzhou_track_data.json', 'r', encoding='utf-8') as f:
+                track_data = json.load(f)
+        except:
+            pass
         
-        response = model.generate_content(prompt)
-        return response.text if response.text else "Ой, что-то пошло не так! 😅 Попробуйте еще раз."
-        
-    except Exception as e:
-        logger.error(f"Ошибка Gemini: {e}")
-        return "⚠️ Ой, произошла ошибка! Попробуйте еще раз. 🌸"
-
-# ===== ОСНОВНАЯ ЛОГИКА ОБРАБОТКИ =====
-def process_delivery_request(user_message):
-    """Обрабатывает запросы на доставку с личностью Айсулу"""
-    try:
-        # Извлекаем параметры
-        weight = extract_weight(user_message)
-        city = extract_city(user_message)
-        product_type = find_product_category(user_message)
-        length, width, height = extract_dimensions(user_message)
-        volume = extract_volume(user_message)
-        
-        # Проверяем наличие всех данных
-        if not weight:
-            return "🌸 Сәлеметсіз бе! 📊 Чтобы рассчитать доставку, укажите вес груза в кг (например: 50 кг)"
-        
-        if not product_type:
-            return "📦 Ой, а что за товар будем отправлять? Укажите тип (мебель, техника, одежда и т.д.) 😊"
-        
-        if not city:
-            return "🏙️ А в какой город Казахстана нужно доставить? Напишите название города 🌸"
-        
-        if not volume and not (length and width and height):
-            return "📐 Чтобы расчет был точным, укажите габариты (например: 1.2×0.8×0.5 м) или объем груза 💫"
-        
-        # Расчет объема если предоставлены габариты
-        if not volume and length and width and height:
-            volume = length * width * height
-        
-        # Производим расчет
-        quick_cost = calculate_quick_cost(weight, product_type, city, volume, length, width, height)
-        
-        if quick_cost:
-            return calculate_detailed_cost(quick_cost, weight, product_type, city)
+        shipment = track_data.get(tracking_number)
+        if shipment:
+            status_emoji = {
+                "принят на складе": "🏭",
+                "в пути до границы": "🚚", 
+                "на границе": "🛃",
+                "в пути до алматы": "🚛",
+                "прибыл в алматы": "🏙️",
+                "доставлен": "✅"
+            }.get(shipment.get('status'), '📦')
+            
+            return {
+                'success': True,
+                'tracking_number': tracking_number,
+                'recipient': shipment.get('fio', 'Не указано'),
+                'product': shipment.get('product', 'Не указано'),
+                'weight_kg': shipment.get('weight', 0),
+                'volume_m3': shipment.get('volume', 0),
+                'status': shipment.get('status', 'В обработке'),
+                'status_emoji': status_emoji,
+                'progress_percent': shipment.get('route_progress', 0)
+            }
         else:
-            return "❌ Ой, не удалось рассчитать стоимость! Проверьте данные и попробуйте еще раз. 🌸"
-            
-    except Exception as e:
-        logger.error(f"Ошибка обработки доставки: {e}")
-        return "⚠️ Ой, ошибка расчета! Попробуйте еще раз или напишите 'Старт'. 🌸"
-
-def process_tracking_request(user_message):
-    """Обрабатывает запросы на отслеживание с личностью Айсулу"""
-    try:
-        # Ищем трек-номер
-        track_match = re.search(r'\b(GZ|IY|SZ)[a-zA-Z0-9]{6,18}\b', user_message.upper())
-        if track_match:
-            track_number = track_match.group(0)
-            
-            # Загрузка данных отслеживания
-            track_data = {}
-            try:
-                with open('guangzhou_track_data.json', 'r', encoding='utf-8') as f:
-                    track_data = json.load(f)
-            except:
-                pass
-            
-            shipment = track_data.get(track_number)
-            if shipment:
-                status_emoji = {
-                    "принят на складе": "🏭",
-                    "в пути до границы": "🚚", 
-                    "на границе": "🛃",
-                    "в пути до алматы": "🚛",
-                    "прибыл в алматы": "🏙️",
-                    "доставлен": "✅"
-                }.get(shipment.get('status'), '📦')
-                
-                return f"""
-📦 **Айсулу нашла ваш груз {track_number}!** 🌸
-
-👤 **Получатель:** {shipment.get('fio', 'Не указано')}
-📦 **Товар:** {shipment.get('product', 'Не указано')}  
-⚖️ **Вес:** {shipment.get('weight', 0)} кг
-📏 **Объем:** {shipment.get('volume', 0)} м³
-
-🔄 **Статус:** {status_emoji} {shipment.get('status', 'В обработке')}
-📊 **Прогресс:** {shipment.get('route_progress', 0)}%
-
-💡 *Для уточнений обращайтесь к вашему менеджеру!* 😊
-                """
-            else:
-                return f"❌ Ой, груз с трек-номером {track_number} не найден! Проверьте номер. 🌸"
-        else:
-            return "📦 Для отслеживания укажите трек-номер (например: GZ123456) 🌸"
+            return {"error": f"Груз с трек-номером {tracking_number} не найден"}
             
     except Exception as e:
         logger.error(f"Ошибка отслеживания: {e}")
-        return "⚠️ Ой, ошибка при поиске груза! Попробуйте еще раз. 🌸"
+        return {"error": f"Ошибка при поиске груза: {str(e)}"}
 
 def save_application(name, phone, details=None):
     """Сохраняет заявку"""
@@ -550,7 +354,6 @@ def save_application(name, phone, details=None):
             'details': details or 'Заявка через чат-бота'
         }
         
-        # Сохранение в файл
         try:
             os.makedirs('data', exist_ok=True)
             applications_file = 'data/applications.json'
@@ -567,11 +370,158 @@ def save_application(name, phone, details=None):
         except Exception as e:
             logger.error(f"Ошибка сохранения заявки: {e}")
         
-        return f"✅ **Рахамет, {name}!** 🌸\nЗаявка успешно сохранена! Менеджер свяжется с вами в течение часа по номеру {phone}."
+        return {
+            'success': True,
+            'message': f"Заявка от {name} сохранена",
+            'application_id': len(applications)
+        }
         
     except Exception as e:
         logger.error(f"Ошибка сохранения: {e}")
-        return "❌ Ой, ошибка при сохранении заявки! Попробуйте еще раз. 🌸"
+        return {"error": f"Ошибка при сохранении заявки: {str(e)}"}
+
+def get_delivery_terms(warehouse=None):
+    """Возвращает информацию о сроках доставки"""
+    try:
+        if warehouse and "гуанчжоу" in warehouse.lower():
+            return {
+                'success': True,
+                'warehouse': 'Гуанчжоу',
+                'route': 'Гуанчжоу → Алматы',
+                'transit_time_days': '10-14 дней',
+                'total_time_days': '15-20 дней',
+                'border_crossing': 'Хоргос'
+            }
+        else:
+            return {
+                'success': True,
+                'general_terms': 'Доставка из Китая в Казахстан',
+                'transit_time_days': '10-20 дней',
+                'customs_clearance': '2-3 дня',
+                'domestic_delivery': '1-4 дня'
+            }
+    except Exception as e:
+        logger.error(f"Ошибка получения сроков: {e}")
+        return {"error": f"Ошибка получения информации о сроках: {str(e)}"}
+
+def get_payment_methods():
+    """Возвращает список способов оплаты"""
+    try:
+        return {
+            'success': True,
+            'payment_methods': [
+                'Банковский перевод (Kaspi, Halyk, Freedom Bank)',
+                'Онлайн-оплата картой',
+                'Alipay & WeChat Pay',
+                'Наличные при получении',
+                'Безналичный расчет для ИП и юр.лиц',
+                'Криптовалюты (Bitcoin, USDT)',
+                'Рассрочка для постоянных клиентов'
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Ошибка получения способов оплаты: {e}")
+        return {"error": f"Ошибка получения способов оплаты: {str(e)}"}
+
+# ===== ОСНОВНАЯ ЛОГИКА ОБРАБОТКИ С ИНСТРУМЕНТАМИ =====
+def execute_tool_function(function_name, parameters):
+    """Выполняет функцию-инструмент по имени"""
+    try:
+        logger.info(f"🔧 Выполнение инструмента: {function_name} с параметрами: {parameters}")
+        
+        if function_name == "calculate_delivery_cost":
+            return calculate_quick_cost(
+                weight=parameters.get('weight_kg'),
+                product_type=parameters.get('product_type'),
+                city=parameters.get('city'),
+                volume=parameters.get('volume_m3'),
+                length=parameters.get('length_m'),
+                width=parameters.get('width_m'),
+                height=parameters.get('height_m')
+            )
+        
+        elif function_name == "track_shipment":
+            return process_tracking_request(parameters.get('tracking_number'))
+        
+        elif function_name == "get_delivery_terms":
+            return get_delivery_terms(parameters.get('warehouse'))
+        
+        elif function_name == "get_payment_methods":
+            return get_payment_methods()
+        
+        elif function_name == "save_customer_application":
+            return save_application(
+                name=parameters.get('name'),
+                phone=parameters.get('phone'),
+                details=parameters.get('details')
+            )
+        
+        else:
+            return {"error": f"Неизвестный инструмент: {function_name}"}
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка выполнения инструмента {function_name}: {e}")
+        return {"error": f"Ошибка выполнения: {str(e)}"}
+
+def get_aisulu_response_with_tools(user_message):
+    """Основная функция получения ответа от Айсулу с инструментами"""
+    if not model:
+        return "🤖 Сервис временно недоступен. Пожалуйста, попробуйте позже."
+    
+    try:
+        system_prompt = f"""
+{AISULU_PROMPT or "Ты - Айсулу, помощник по доставке из Китая в Казахстан. Отвечай дружелюбно, с казахским колоритом."}
+
+Ты имеешь доступ к следующим инструментам:
+- calculate_delivery_cost: для расчета стоимости доставки
+- track_shipment: для отслеживания грузов
+- get_delivery_terms: для получения информации о сроках
+- get_payment_methods: для получения способов оплаты
+- save_customer_application: для сохранения заявок
+
+Используй инструменты когда нужны точные данные из наших систем. 
+Отвечай как живой человек - дружелюбно, с эмодзи, на русском с казахским колоритом.
+"""
+        
+        response = model.generate_content(
+            contents=[system_prompt, user_message],
+            tools=tools
+        )
+        
+        # Проверяем, вызвал ли Gemini инструмент
+        if (hasattr(response, 'candidates') and 
+            response.candidates and 
+            hasattr(response.candidates[0], 'content') and
+            response.candidates[0].content and
+            hasattr(response.candidates[0].content, 'parts') and
+            response.candidates[0].content.parts):
+            
+            for part in response.candidates[0].content.parts:
+                if hasattr(part, 'function_call') and part.function_call:
+                    function_call = part.function_call
+                    
+                    # Выполняем инструмент
+                    tool_result = execute_tool_function(
+                        function_call.name,
+                        dict(function_call.args)
+                    )
+                    
+                    # Передаем результат обратно Gemini для оформления ответа
+                    final_response = model.generate_content([
+                        system_prompt,
+                        f"Пользователь спросил: {user_message}",
+                        f"Ты вызвал инструмент {function_call.name} с результатом: {tool_result}",
+                        "Пожалуйста, оформи красивый ответ как Айсулу на основе этого результата."
+                    ])
+                    
+                    return final_response.text if final_response.text else "Ой, что-то пошло не так! 😅"
+        
+        # Если инструменты не вызывались, возвращаем обычный ответ
+        return response.text if response.text else "Ой, не получилось ответить! Попробуйте еще раз. 🌸"
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка в get_aisulu_response_with_tools: {e}")
+        return "⚠️ Ой, произошла ошибка! Пожалуйста, попробуйте еще раз. 🌸"
 
 # ===== WEB ЭНДПОИНТЫ =====
 @app.route('/')
@@ -595,80 +545,7 @@ def chat():
         if 'chat_history' not in session:
             session['chat_history'] = []
 
-        # ==== ВСТАВЬ КОНТЕКСТНУЮ ПАМЯТЬ ЗДЕСЬ ====
-        # КОНТЕКСТНАЯ ПАМЯТЬ - сохраняем предыдущие данные
-        if 'context' not in session:
-            session['context'] = {
-                'weight': None,
-                'city': None, 
-                'product_type': None,
-                'dimensions': None,
-                'boxes_count': None
-            }
-        
-        # АВТОМАТИЧЕСКОЕ ИЗВЛЕЧЕНИЕ И СОХРАНЕНИЕ ДАННЫХ
-        current_weight = extract_weight(user_message)
-        current_city = extract_city(user_message)  
-        current_product = find_product_category(user_message)
-        current_dims = extract_dimensions(user_message)
-        current_boxes = extract_boxes_from_message(user_message)
-        
-        # ОБНОВЛЯЕМ КОНТЕКСТ если нашли новые данные
-        if current_weight: session['context']['weight'] = current_weight
-        if current_city: session['context']['city'] = current_city
-        if current_product: session['context']['product_type'] = current_product  
-        if current_dims != (None, None, None): session['context']['dimensions'] = current_dims
-        if current_boxes: session['context']['boxes_count'] = len(current_boxes)
-        
-        context = session['context']
-        
-        # УМНАЯ ОБРАБОТКА С УЧЕТОМ КОНТЕКСТА
-        has_weight = context['weight'] or current_weight
-        has_city = context['city'] or current_city  
-        has_product = context['product_type'] or current_product
-        has_dims = context['dimensions'] or (current_dims != (None, None, None))
-        
-        # ЕСЛИ ЕСТЬ ВСЕ ДАННЫЕ ДЛЯ РАСЧЕТА - СЧИТАЕМ АВТОМАТИЧЕСКИ
-        if has_weight and has_city and has_product and has_dims:
-            weight = context['weight'] or current_weight
-            city = context['city'] or current_city
-            product_type = context['product_type'] or current_product
-            dims = context['dimensions'] or current_dims
-            
-            # РАСЧЕТ С УЧЕТОМ КОРОБОК
-            if context['boxes_count'] and context['boxes_count'] > 1:
-                total_weight = weight * context['boxes_count']
-                volume_per_box = dims[0] * dims[1] * dims[2] if dims[0] else None
-                total_volume = volume_per_box * context['boxes_count'] if volume_per_box else None
-                
-                quick_cost = calculate_quick_cost(total_weight, product_type, city, total_volume, dims[0], dims[1], dims[2])
-                if quick_cost:
-                    response = f"""
-🎯 **Айсулу всё поняла! Рассчитываю доставку...** 🌸
-
-📦 **Ваш заказ:**
-• {context['boxes_count']} коробок {product_type}
-• Вес каждой: {weight} кг
-• Размер: {dims[0]*100 if dims[0] else '?'}×{dims[1]*100 if dims[1] else '?'}×{dims[2]*100 if dims[2] else '?'} см
-• Общий вес: {total_weight} кг
-
-""" + calculate_detailed_cost(quick_cost, total_weight, product_type, city)
-                else:
-                    response = "❌ Ой, не могу рассчитать! Проверьте данные 🌸"
-            else:
-                # Расчет для одной коробки
-                quick_cost = calculate_quick_cost(weight, product_type, city, None, dims[0], dims[1], dims[2])
-                if quick_cost:
-                    response = calculate_detailed_cost(quick_cost, weight, product_type, city)
-                else:
-                    response = "❌ Ой, ошибка расчета! 🌸"
-            
-            # Очищаем контекст после расчета
-            session['context'] = {'weight': None, 'city': None, 'product_type': None, 'dimensions': None, 'boxes_count': None}
-            return jsonify({"response": response})
-        # ==== КОНЕЦ КОНТЕКСТНОЙ ПАМЯТИ ====
-
-        # Обработка команды "Старт"
+        # Обработка команды "Старт" (единственное что оставляем из старой логики)
         if user_message.lower() in ['старт', 'start', 'новый расчет', 'сброс', 'баста']:
             session.clear()
             session['chat_history'] = []
@@ -682,93 +559,10 @@ def chat():
 ❓ Ответить на вопросы о логистике
 
 **Просто напишите что вам нужно!** 😊
-
-*Примеры:*
-• "50 кг мебели в Алматы, габариты 2×1×0.5 м"
-• "Где мой груз GZ123456?"
-• "Расскажите про тарифы и оплату"
-• "Хочу оставить заявку на доставку"
-
-**Жарайсың! Давайте начнем!** 💫
             """})
 
-        # Проверка на множественные коробки
-        boxes = extract_boxes_from_message(user_message)
-        if boxes and len(boxes) > 1:
-            total_weight = sum(box['weight'] for box in boxes)
-            session['multiple_boxes'] = boxes
-            
-            boxes_list = "\n".join([f"• {i+1}. {box['weight']} кг" for i, box in enumerate(boxes)])
-            
-            response = f"""
-📦 **Ой, обнаружила несколько коробок!** 🌸
-{boxes_list}
-
-📊 **Общий вес:** {total_weight} кг
-
-🏙️ **Для расчета укажите:**
-• Город доставки
-• Тип товара  
-• Габариты коробок
-
-💡 **Пример:** "в Астану, одежда, коробки 60×40×30 см"
-
-**Жарайсың! Продолжаем!** 💫
-            """
-            return jsonify({"response": response})
-
-        # Проверка на паллеты
-        pallets = extract_pallets_from_message(user_message)
-        if pallets:
-            total_weight = sum(pallet['weight'] for pallet in pallets)
-            total_volume = sum(pallet['volume'] for pallet in pallets)
-            
-            response = f"""
-🎯 **Обнаружены паллеты!** 🌸
-• Количество: {len(pallets)} шт
-• Общий вес: {total_weight} кг  
-• Общий объем: {total_volume:.1f} м³
-
-🏙️ **Для точного расчета укажите:**
-• Город доставки
-• Тип товара на паллетах
-
-💡 **Пример:** "в Караганду, мебель на паллетах"
-
-**Отлично! Почти готово!** 😊
-            """
-            return jsonify({"response": response})
-
-        # Определяем тип запроса
-        text_lower = user_message.lower()
-        
-        # Отслеживание
-        if any(word in text_lower for word in ['трек', 'отследить', 'статус', 'где', 'груз', 'посылка']) or re.search(r'\b(GZ|IY|SZ)[a-zA-Z0-9]', text_lower.upper()):
-            response = process_tracking_request(user_message)
-        
-        # Заявка (есть имя и телефон)
-        elif re.search(r'(?:имя|зовут|меня зовут)\s*[:\-]?\s*[а-яa-z]{2,}', text_lower) and re.search(r'\d{10,11}', text_lower):
-            name_match = re.search(r'(?:имя|зовут|меня зовут)\s*[:\-]?\s*([а-яa-z]{2,})', text_lower)
-            phone_match = re.search(r'(\d{10,11})', text_lower)
-            
-            if name_match and phone_match:
-                name = name_match.group(1).capitalize()
-                phone = phone_match.group(1)
-                response = save_application(name, phone, user_message)
-            else:
-                response = "❌ Ой, не удалось распознать контакты! Укажите имя и телефон. 🌸"
-        
-        # Расчет доставки (есть параметры)
-        elif (extract_weight(user_message) and extract_city(user_message)) or any(word in text_lower for word in ['рассчитай', 'посчитай', 'сколько', 'стоимость', 'доставк']):
-            response = process_delivery_request(user_message)
-        
-        # Приветствие
-        elif any(greeting in text_lower for greeting in GREETINGS):
-            response = "Сәлеметсіз бе! 🌸 Я Айсулу - ваш помощник в доставке из Китая! Чем могу помочь?"
-        
-        # Общие вопросы - используем Gemini с личностью Айсулу
-        else:
-            response = get_gemini_response(user_message, session.get('chat_history', []))
+        # ВСЁ остальное обрабатываем через AI-first архитектуру
+        response = get_aisulu_response_with_tools(user_message)
 
         # Сохраняем в историю
         session['chat_history'].append(f"Клиент: {user_message}")
