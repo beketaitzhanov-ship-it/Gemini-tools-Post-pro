@@ -595,6 +595,79 @@ def chat():
         if 'chat_history' not in session:
             session['chat_history'] = []
 
+        # ==== ВСТАВЬ КОНТЕКСТНУЮ ПАМЯТЬ ЗДЕСЬ ====
+        # КОНТЕКСТНАЯ ПАМЯТЬ - сохраняем предыдущие данные
+        if 'context' not in session:
+            session['context'] = {
+                'weight': None,
+                'city': None, 
+                'product_type': None,
+                'dimensions': None,
+                'boxes_count': None
+            }
+        
+        # АВТОМАТИЧЕСКОЕ ИЗВЛЕЧЕНИЕ И СОХРАНЕНИЕ ДАННЫХ
+        current_weight = extract_weight(user_message)
+        current_city = extract_city(user_message)  
+        current_product = find_product_category(user_message)
+        current_dims = extract_dimensions(user_message)
+        current_boxes = extract_boxes_from_message(user_message)
+        
+        # ОБНОВЛЯЕМ КОНТЕКСТ если нашли новые данные
+        if current_weight: session['context']['weight'] = current_weight
+        if current_city: session['context']['city'] = current_city
+        if current_product: session['context']['product_type'] = current_product  
+        if current_dims != (None, None, None): session['context']['dimensions'] = current_dims
+        if current_boxes: session['context']['boxes_count'] = len(current_boxes)
+        
+        context = session['context']
+        
+        # УМНАЯ ОБРАБОТКА С УЧЕТОМ КОНТЕКСТА
+        has_weight = context['weight'] or current_weight
+        has_city = context['city'] or current_city  
+        has_product = context['product_type'] or current_product
+        has_dims = context['dimensions'] or (current_dims != (None, None, None))
+        
+        # ЕСЛИ ЕСТЬ ВСЕ ДАННЫЕ ДЛЯ РАСЧЕТА - СЧИТАЕМ АВТОМАТИЧЕСКИ
+        if has_weight and has_city and has_product and has_dims:
+            weight = context['weight'] or current_weight
+            city = context['city'] or current_city
+            product_type = context['product_type'] or current_product
+            dims = context['dimensions'] or current_dims
+            
+            # РАСЧЕТ С УЧЕТОМ КОРОБОК
+            if context['boxes_count'] and context['boxes_count'] > 1:
+                total_weight = weight * context['boxes_count']
+                volume_per_box = dims[0] * dims[1] * dims[2] if dims[0] else None
+                total_volume = volume_per_box * context['boxes_count'] if volume_per_box else None
+                
+                quick_cost = calculate_quick_cost(total_weight, product_type, city, total_volume, dims[0], dims[1], dims[2])
+                if quick_cost:
+                    response = f"""
+🎯 **Айсулу всё поняла! Рассчитываю доставку...** 🌸
+
+📦 **Ваш заказ:**
+• {context['boxes_count']} коробок {product_type}
+• Вес каждой: {weight} кг
+• Размер: {dims[0]*100 if dims[0] else '?'}×{dims[1]*100 if dims[1] else '?'}×{dims[2]*100 if dims[2] else '?'} см
+• Общий вес: {total_weight} кг
+
+""" + calculate_detailed_cost(quick_cost, total_weight, product_type, city)
+                else:
+                    response = "❌ Ой, не могу рассчитать! Проверьте данные 🌸"
+            else:
+                # Расчет для одной коробки
+                quick_cost = calculate_quick_cost(weight, product_type, city, None, dims[0], dims[1], dims[2])
+                if quick_cost:
+                    response = calculate_detailed_cost(quick_cost, weight, product_type, city)
+                else:
+                    response = "❌ Ой, ошибка расчета! 🌸"
+            
+            # Очищаем контекст после расчета
+            session['context'] = {'weight': None, 'city': None, 'product_type': None, 'dimensions': None, 'boxes_count': None}
+            return jsonify({"response": response})
+        # ==== КОНЕЦ КОНТЕКСТНОЙ ПАМЯТИ ====
+
         # Обработка команды "Старт"
         if user_message.lower() in ['старт', 'start', 'новый расчет', 'сброс', 'баста']:
             session.clear()
