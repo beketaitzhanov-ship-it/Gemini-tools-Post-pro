@@ -59,7 +59,7 @@ else:
     EXCHANGE_RATE, DESTINATION_ZONES, T1_RATES_DENSITY, T2_RATES, T2_RATES_DETAILED, PRODUCT_CATEGORIES = 550, {}, {}, {}, {}, {}
 
 # ===== ИНСТРУМЕНТЫ ДЛЯ GEMINI =====
-# ИСПРАВЛЕНИЕ: убрал parameters для функций без параметров
+# ИСПРАВЛЕНИЕ: используем правильный формат через genai.types
 tools = [
     {
         "function_declarations": [
@@ -67,36 +67,15 @@ tools = [
                 "name": "calculate_delivery_cost",
                 "description": "Рассчитать стоимость доставки из Китая в Казахстан по нашим тарифам",
                 "parameters": {
-                    "type": "object",
+                    "type": "OBJECT",
                     "properties": {
-                        "weight_kg": {
-                            "type": "number", 
-                            "description": "Общий вес груза в килограммах"
-                        },
-                        "city": {
-                            "type": "string", 
-                            "description": "Город доставки в Казахстане: Алматы, Астана, Шымкент и др."
-                        },
-                        "product_type": {
-                            "type": "string", 
-                            "description": "Тип товара: одежда, мебель, техника, косметика, автозапчасти и т.д."
-                        },
-                        "volume_m3": {
-                            "type": "number", 
-                            "description": "Объем груза в кубических метрах"
-                        },
-                        "length_m": {
-                            "type": "number", 
-                            "description": "Длина груза в метрах"
-                        },
-                        "width_m": {
-                            "type": "number", 
-                            "description": "Ширина груза в метрах"
-                        },
-                        "height_m": {
-                            "type": "number", 
-                            "description": "Высота груза в метрах"
-                        }
+                        "weight_kg": {"type": "NUMBER", "description": "Общий вес груза в килограммах"},
+                        "city": {"type": "STRING", "description": "Город доставки в Казахстане: Алматы, Астана, Шымкент и др."},
+                        "product_type": {"type": "STRING", "description": "Тип товара: одежда, мебель, техника, косметика, автозапчасти и т.д."},
+                        "volume_m3": {"type": "NUMBER", "description": "Объем груза в кубических метрах"},
+                        "length_m": {"type": "NUMBER", "description": "Длина груза в метрах"},
+                        "width_m": {"type": "NUMBER", "description": "Ширина груза в метрах"},
+                        "height_m": {"type": "NUMBER", "description": "Высота груза в метрах"}
                     },
                     "required": ["weight_kg", "city", "product_type"]
                 }
@@ -105,12 +84,9 @@ tools = [
                 "name": "track_shipment",
                 "description": "Отследить статус груза по трек-номеру",
                 "parameters": {
-                    "type": "object",
+                    "type": "OBJECT",
                     "properties": {
-                        "tracking_number": {
-                            "type": "string", 
-                            "description": "Трек-номер груза (начинается с GZ, IY, SZ)"
-                        }
+                        "tracking_number": {"type": "STRING", "description": "Трек-номер груза (начинается с GZ, IY, SZ)"}
                     },
                     "required": ["tracking_number"]
                 }
@@ -118,31 +94,20 @@ tools = [
             {
                 "name": "get_delivery_terms",
                 "description": "Получить информацию о сроках доставки"
-                # ИСПРАВЛЕНИЕ: убрал parameters для функции без параметров
             },
             {
                 "name": "get_payment_methods", 
                 "description": "Получить список доступных способов оплаты"
-                # ИСПРАВЛЕНИЕ: убрал parameters для функции без параметров
             },
             {
                 "name": "save_customer_application",
                 "description": "Сохранить заявку клиента для обратного звонка",
                 "parameters": {
-                    "type": "object",
+                    "type": "OBJECT",
                     "properties": {
-                        "name": {
-                            "type": "string",
-                            "description": "Имя клиента"
-                        },
-                        "phone": {
-                            "type": "string", 
-                            "description": "Телефон клиента (10-11 цифр)"
-                        },
-                        "details": {
-                            "type": "string",
-                            "description": "Дополнительная информация о заявке"
-                        }
+                        "name": {"type": "STRING", "description": "Имя клиента"},
+                        "phone": {"type": "STRING", "description": "Телефон клиента (10-11 цифр)"},
+                        "details": {"type": "STRING", "description": "Дополнительная информация о заявке"}
                     },
                     "required": ["name", "phone"]
                 }
@@ -158,9 +123,9 @@ try:
     if GEMINI_API_KEY:
         genai.configure(api_key=GEMINI_API_KEY)
         
-        # Инициализация модели с инструментами
+        # ИСПРАВЛЕНИЕ: используем актуальное имя модели
         model = genai.GenerativeModel(
-            'models/gemini-2.0-flash',
+            'gemini-1.5-flash-latest',  # ← актуальная модель
             tools=tools
         )
         logger.info("✅ Модель Gemini инициализирована с инструментами")
@@ -466,10 +431,31 @@ def get_aisulu_response_with_tools(user_message):
         return "🤖 Сервис временно недоступен. Пожалуйста, попробуйте позже."
     
     try:
+        # ИСПРАВЛЕНИЕ: используем историю диалога для контекста
+        chat_history = session.get('chat_history', [])
+        
+        # Собираем весь контекст для Gemini
+        messages = []
+        
+        # Добавляем системный промпт
+        messages.append(AISULU_PROMPT)
+        
+        # Добавляем историю диалога
+        for message in chat_history[-6:]:  # берем последние 6 сообщений
+            messages.append(message)
+        
+        # Добавляем текущее сообщение пользователя
+        messages.append(user_message)
+        
+        # Объединяем все в один промпт
+        full_prompt = "\n\n".join(messages)
+        
         # Передаем system_instruction в generate_content()
         response = model.generate_content(
-            user_message,
-            system_instruction=AISULU_PROMPT
+            full_prompt,
+            generation_config=genai.types.GenerationConfig(
+                temperature=0.7
+            )
         )
         
         # Проверяем, есть ли вызов функции в ответе
@@ -500,20 +486,24 @@ def get_aisulu_response_with_tools(user_message):
                             }]
                         }
                         
-                        # Передаем system_instruction во втором вызове тоже
+                        # Передаем system_instruction во втором вызове с историей
                         final_response = model.generate_content(
                             [
-                                user_message,
+                                full_prompt,
                                 candidate.content,
                                 function_response_content
                             ],
-                            system_instruction=AISULU_PROMPT
+                            generation_config=genai.types.GenerationConfig(
+                                temperature=0.7
+                            )
                         )
                         
-                        return final_response.text if final_response.text else "Ой, что-то пошло не так! 😅"
+                        final_text = final_response.text if final_response.text else "Ой, что-то пошло не так! 😅"
+                        return final_text
         
         # Если вызова функции не было, возвращаем текстовый ответ
-        return response.text if response.text else "Ой, не получилось ответить! Попробуйте еще раз. 🌸"
+        final_text = response.text if response.text else "Ой, не получилось ответить! Попробуйте еще раз. 🌸"
+        return final_text
         
     except Exception as e:
         logger.error(f"❌ Ошибка в get_aisulu_response_with_tools: {e}")
@@ -560,10 +550,11 @@ def chat():
         # ВСЁ остальное обрабатываем через AI-first архитектуру
         response = get_aisulu_response_with_tools(user_message)
 
-        # Сохраняем в историю
-        session['chat_history'].append(f"Клиент: {user_message}")
+        # ИСПРАВЛЕНИЕ: сохраняем в историю с правильным форматом
+        session['chat_history'].append(f"Пользователь: {user_message}")
         session['chat_history'].append(f"Айсулу: {response}")
         
+        # Ограничиваем историю 10 сообщениями
         if len(session['chat_history']) > 10:
             session['chat_history'] = session['chat_history'][-10:]
 
