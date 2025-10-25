@@ -368,173 +368,140 @@ def calculate_detailed_cost(quick_cost, weight, product_type, city):
     
     return response
 
-# ===== GEMINI TOOLS ИНИЦИАЛИЗАЦИЯ =====
-base_model = None
-model_with_tools = None
+# ===== GEMINI ИНИЦИАЛИЗАЦИЯ =====
+model = None
 
 try:
     if GEMINI_API_KEY:
         genai.configure(api_key=GEMINI_API_KEY)
-        
-        # Базовая модель
-        base_model = genai.GenerativeModel('gemini-1.5-flash')
-        
-        # Функции для инструментов
-        function_declarations = [
-            genai.FunctionDeclaration(
-                name="calculate_delivery_cost",
-                description="Рассчитать стоимость доставки груза из Китая в Казахстан",
-                parameters={
-                    "type": "OBJECT",
-                    "properties": {
-                        "weight": {
-                            "type": "NUMBER", 
-                            "description": "Вес груза в килограммах"
-                        },
-                        "product_type": {
-                            "type": "STRING",
-                            "description": "Тип товара: мебель, техника, одежда, косметика, автозапчасти, общие"
-                        },
-                        "city": {
-                            "type": "STRING", 
-                            "description": "Город доставки в Казахстане: алматы, астана, караганда и др."
-                        },
-                        "volume": {
-                            "type": "NUMBER",
-                            "description": "Объем груза в кубических метрах"
-                        },
-                        "length": {
-                            "type": "NUMBER",
-                            "description": "Длина груза в метрах"
-                        },
-                        "width": {
-                            "type": "NUMBER",
-                            "description": "Ширина груза в метрах" 
-                        },
-                        "height": {
-                            "type": "NUMBER",
-                            "description": "Высота груза в метрах"
-                        }
-                    },
-                    "required": ["weight", "product_type", "city"]
-                }
-            ),
-            genai.FunctionDeclaration(
-                name="track_shipment",
-                description="Отследить статус груза по трек-номеру",
-                parameters={
-                    "type": "OBJECT",
-                    "properties": {
-                        "track_number": {
-                            "type": "STRING",
-                            "description": "Трек-номер груза в формате GZ123456, IY789012 и т.д."
-                        }
-                    },
-                    "required": ["track_number"]
-                }
-            ),
-            genai.FunctionDeclaration(
-                name="save_application", 
-                description="Сохранить заявку на доставку для связи менеджера с клиентом",
-                parameters={
-                    "type": "OBJECT",
-                    "properties": {
-                        "name": {
-                            "type": "STRING",
-                            "description": "Имя клиента"
-                        },
-                        "phone": {
-                            "type": "STRING", 
-                            "description": "Номер телефона клиента"
-                        },
-                        "details": {
-                            "type": "STRING",
-                            "description": "Детали заявки: вес, товар, город и т.д."
-                        }
-                    },
-                    "required": ["name", "phone"]
-                }
-            ),
-            genai.FunctionDeclaration(
-                name="get_static_info",
-                description="Предоставить информацию о тарифах, оплате, процедуре доставки",
-                parameters={
-                    "type": "OBJECT", 
-                    "properties": {
-                        "info_type": {
-                            "type": "STRING",
-                            "description": "Тип информации: тарифы, оплата, процедура, контакты"
-                        }
-                    },
-                    "required": ["info_type"]
-                }
-            )
-        ]
-        
-        # Модель с инструментами
-        model_with_tools = genai.GenerativeModel(
-            model_name='gemini-1.5-flash',
-            tools=function_declarations
-        )
-        
-        logger.info("✅ Модель Gemini с инструментами инициализирована")
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        logger.info("✅ Модель Gemini инициализирована")
         
 except Exception as e:
     logger.error(f"❌ Ошибка инициализации Gemini: {e}")
 
-# ===== РЕАЛИЗАЦИИ ФУНКЦИЙ ДЛЯ GEMINI TOOLS =====
-def calculate_delivery_cost_impl(weight, product_type, city, volume=None, length=None, width=None, height=None):
-    """Реализация расчета стоимости для Gemini Tools"""
+def get_gemini_response(user_message, context=""):
+    """Получает ответ от Gemini"""
+    if not model:
+        return "🤖 Сервис временно недоступен."
+    
     try:
-        logger.info(f"🔄 Расчет: {weight}кг, {product_type}, {city}")
+        prompt = f"""
+Ты — умный ассистент компании PostPro Logistics. Помогаешь клиентам рассчитать стоимость доставки, отследить грузы и оформить заявки.
+
+**Твои возможности:**
+📊 Расчет стоимости доставки (нужен вес, товар, город, габариты)
+📦 Отслеживание грузов по трек-номеру  
+💼 Оформление заявок (нужны имя и телефон)
+❓ Ответы на вопросы о тарифах, оплате, процедуре
+
+**Важная информация:**
+• Склады в Китае: Гуанчжоу и ИУ
+• Оплата: пост-оплата при получении
+• Срок доставки: 15-20 дней
+
+Контекст: {context}
+
+Сообщение клиента: {user_message}
+
+Отвечай дружелюбно и профессионально! 😊
+        """
         
-        # Используем нашу основную функцию расчета
+        response = model.generate_content(prompt)
+        return response.text if response.text else "Не удалось обработать запрос."
+        
+    except Exception as e:
+        logger.error(f"Ошибка Gemini: {e}")
+        return "⚠️ Произошла ошибка. Попробуйте еще раз."
+
+# ===== ОСНОВНАЯ ЛОГИКА ОБРАБОТКИ =====
+def process_delivery_request(user_message):
+    """Обрабатывает запросы на доставку"""
+    try:
+        # Извлекаем параметры
+        weight = extract_weight(user_message)
+        city = extract_city(user_message)
+        product_type = find_product_category(user_message)
+        length, width, height = extract_dimensions(user_message)
+        volume = extract_volume(user_message)
+        
+        # Проверяем наличие всех данных
+        if not weight:
+            return "📊 Укажите вес груза в кг (например: 50 кг)"
+        if not product_type:
+            return "📦 Укажите тип товара (мебель, техника, одежда и т.д.)"
+        if not city:
+            return "🏙️ Укажите город доставки (Алматы, Астана и т.д.)"
+        if not volume and not (length and width and height):
+            return "📐 Укажите габариты (например: 1.2×0.8×0.5 м) или объем"
+        
+        # Расчет объема если предоставлены габариты
+        if not volume and length and width and height:
+            volume = length * width * height
+        
+        # Производим расчет
         quick_cost = calculate_quick_cost(weight, product_type, city, volume, length, width, height)
         
         if quick_cost:
-            detailed_response = calculate_detailed_cost(quick_cost, weight, product_type, city)
-            return {
-                "success": True,
-                "calculation": detailed_response,
-                "total_cost": quick_cost['total'],
-                "currency": "тенге"
-            }
+            return calculate_detailed_cost(quick_cost, weight, product_type, city)
         else:
-            return {"error": "Не удалось рассчитать стоимость. Проверьте данные."}
+            return "❌ Не удалось рассчитать стоимость. Проверьте данные."
             
     except Exception as e:
-        logger.error(f"Ошибка расчета: {e}")
-        return {"error": f"Ошибка расчета: {str(e)}"}
+        logger.error(f"Ошибка обработки доставки: {e}")
+        return "⚠️ Ошибка расчета. Попробуйте еще раз."
 
-def track_shipment_impl(track_number):
-    """Реализация отслеживания для Gemini Tools"""
+def process_tracking_request(user_message):
+    """Обрабатывает запросы на отслеживание"""
     try:
-        # Загрузка данных отслеживания
-        track_data = {}
-        try:
-            with open('guangzhou_track_data.json', 'r', encoding='utf-8') as f:
-                track_data = json.load(f)
-        except:
-            pass
-        
-        shipment = track_data.get(track_number.upper())
-        if shipment:
-            return {
-                "success": True,
-                "track_number": track_number,
-                "status": shipment.get('status', 'неизвестен'),
-                "location": shipment.get('warehouse', 'Гуанчжоу'),
-                "progress": shipment.get('route_progress', 0),
-                "description": f"Груз {track_number} - {shipment.get('status', 'в обработке')}"
-            }
+        # Ищем трек-номер
+        track_match = re.search(r'\b(GZ|IY|SZ)[a-zA-Z0-9]{6,18}\b', user_message.upper())
+        if track_match:
+            track_number = track_match.group(0)
+            
+            # Загрузка данных отслеживания
+            track_data = {}
+            try:
+                with open('guangzhou_track_data.json', 'r', encoding='utf-8') as f:
+                    track_data = json.load(f)
+            except:
+                pass
+            
+            shipment = track_data.get(track_number)
+            if shipment:
+                status_emoji = {
+                    "принят на складе": "🏭",
+                    "в пути до границы": "🚚", 
+                    "на границе": "🛃",
+                    "в пути до алматы": "🚛",
+                    "прибыл в алматы": "🏙️",
+                    "доставлен": "✅"
+                }.get(shipment.get('status'), '📦')
+                
+                return f"""
+📦 **Информация о грузе {track_number}:**
+
+👤 **Получатель:** {shipment.get('fio', 'Не указано')}
+📦 **Товар:** {shipment.get('product', 'Не указано')}  
+⚖️ **Вес:** {shipment.get('weight', 0)} кг
+📏 **Объем:** {shipment.get('volume', 0)} м³
+
+🔄 **Статус:** {status_emoji} {shipment.get('status', 'В обработке')}
+📊 **Прогресс:** {shipment.get('route_progress', 0)}%
+
+💡 Для уточнений обращайтесь к вашему менеджеру
+                """
+            else:
+                return f"❌ Груз с трек-номером {track_number} не найден."
         else:
-            return {"error": f"Груз {track_number} не найден"}
+            return "📦 Для отслеживания укажите трек-номер (например: GZ123456)"
             
     except Exception as e:
-        return {"error": f"Ошибка отслеживания: {str(e)}"}
+        logger.error(f"Ошибка отслеживания: {e}")
+        return "⚠️ Ошибка при поиске груза."
 
-def save_application_impl(name, phone, details=None):
-    """Реализация сохранения заявки для Gemini Tools"""
+def save_application(name, phone, details=None):
+    """Сохраняет заявку"""
     try:
         application_data = {
             'timestamp': datetime.now().isoformat(),
@@ -560,140 +527,11 @@ def save_application_impl(name, phone, details=None):
         except Exception as e:
             logger.error(f"Ошибка сохранения заявки: {e}")
         
-        return {
-            "success": True,
-            "message": "Заявка успешно сохранена! Менеджер свяжется с вами в течение часа."
-        }
+        return "✅ Заявка успешно сохранена! Менеджер свяжется с вами в течение часа."
         
     except Exception as e:
-        return {"error": f"Ошибка сохранения: {str(e)}"}
-
-def get_static_info_impl(info_type):
-    """Реализация получения информации для Gemini Tools"""
-    info_responses = {
-        'тарифы': """
-🚚 **Тарифы PostPro:**
-
-**Т1 (Китай → Алматы):**
-• Расчет по плотности груза
-• Мебель: от 80 тг/кг  
-• Техника: от 120 тг/кг
-• Одежда: от 60 тг/кг
-• Чем выше плотность - тем выгоднее!
-
-**Т2 (Алматы → ваш город):**
-• Алматы: от 150 тг/кг
-• Другие города: прогрессивный тариф
-        """,
-        'оплата': """
-💳 **Условия оплаты:**
-
-💰 **ПОСТ-ОПЛАТА** - платите при получении!
-
-• Наличными курьеру
-• Kaspi Bank
-• Halyk Bank  
-• Freedom Bank
-• Безналичный расчет
-
-✅ Без предоплат!
-        """,
-        'процедура': """
-📦 **Процедура доставки:**
-
-1. Прием груза на складе в Китае
-2. Взвешивание и фотофиксация  
-3. Отправка в путь (15-20 дней)
-4. Уведомление о прибытии
-5. Доставка и оплата
-
-⏱️ Срок: 15-25 дней
-        """,
-        'контакты': """
-📞 **Контакты PostPro:**
-
-• Телефон: +7 (777) 123-45-67
-• WhatsApp: +7 (777) 123-45-67
-• Email: info@postpro.kz
-
-🕘 График: Пн-Пт 9:00-19:00
-        """
-    }
-    
-    response = info_responses.get(info_type.lower(), "Информация не найдена.")
-    return {"info_type": info_type, "content": response}
-
-# ===== ОБРАБОТКА СООБЩЕНИЙ С GEMINI TOOLS =====
-def process_with_gemini_tools(user_message):
-    """Обработка сообщения с использованием Gemini Tools"""
-    if not model_with_tools:
-        return "🤖 Сервис временно недоступен. Пожалуйста, попробуйте позже."
-    
-    try:
-        # Системный промпт
-        system_prompt = """
-Ты — умный ассистент компании PostPro Logistics. Твоя главная цель — помочь клиенту рассчитать стоимость доставки и оформить заявку.
-
-Используй инструменты когда:
-- Есть вес, товар и город → calculate_delivery_cost
-- Есть трек-номер → track_shipment  
-- Клиент предоставил имя и телефон → save_application
-- Спрашивают про тарифы/оплату → get_static_info
-
-Будь дружелюбным и профессиональным! 😊
-        """
-        
-        full_message = f"{system_prompt}\n\nСообщение клиента: {user_message}"
-        
-        chat = model_with_tools.start_chat()
-        response = chat.send_message(full_message)
-        
-        # Проверяем вызов функции
-        if (hasattr(response, 'candidates') and response.candidates and
-            hasattr(response.candidates[0], 'content') and
-            response.candidates[0].content.parts):
-            
-            for part in response.candidates[0].content.parts:
-                if hasattr(part, 'function_call') and part.function_call:
-                    function_call = part.function_call
-                    function_name = function_call.name
-                    args = function_call.args
-                    
-                    logger.info(f"🔧 Вызов функции: {function_name} с args: {args}")
-                    
-                    # Вызываем соответствующую функцию
-                    if function_name == "calculate_delivery_cost":
-                        result = calculate_delivery_cost_impl(**args)
-                    elif function_name == "track_shipment":
-                        result = track_shipment_impl(**args)
-                    elif function_name == "save_application":
-                        result = save_application_impl(**args)
-                    elif function_name == "get_static_info":
-                        result = get_static_info_impl(**args)
-                    else:
-                        result = {"error": "Неизвестная функция"}
-                    
-                    # Отправляем результат обратно
-                    try:
-                        function_response = genai.types.Part.from_function_response(
-                            name=function_name,
-                            response=result
-                        )
-                        final_response = chat.send_message(function_response)
-                        return final_response.text if final_response.text else "✅ Запрос обработан успешно!"
-                    except Exception as e:
-                        logger.error(f"Ошибка отправки ответа функции: {e}")
-                        # Возвращаем результат напрямую если есть calculation
-                        if function_name == "calculate_delivery_cost" and "calculation" in result:
-                            return result["calculation"]
-                        return "✅ Запрос обработан успешно!"
-        
-        # Если не было вызова функций, возвращаем текстовый ответ
-        return response.text if response.text else "🤔 Не удалось обработать ваш запрос. Пожалуйста, уточните."
-        
-    except Exception as e:
-        logger.error(f"❌ Ошибка обработки с инструментами: {e}")
-        return f"⚠️ Произошла ошибка: {str(e)}"
+        logger.error(f"Ошибка сохранения: {e}")
+        return "❌ Ошибка при сохранении заявки."
 
 # ===== WEB ЭНДПОИНТЫ =====
 @app.route('/')
@@ -782,17 +620,41 @@ def chat():
             """
             return jsonify({"response": response})
 
-        # Основная обработка с Gemini Tools
-        bot_response = process_with_gemini_tools(user_message)
+        # Определяем тип запроса
+        text_lower = user_message.lower()
+        
+        # Отслеживание
+        if any(word in text_lower for word in ['трек', 'отследить', 'статус', 'где', 'груз', 'посылка']) or re.search(r'\b(GZ|IY|SZ)[a-zA-Z0-9]', text_lower.upper()):
+            response = process_tracking_request(user_message)
+        
+        # Заявка (есть имя и телефон)
+        elif re.search(r'(?:имя|зовут|меня зовут)\s*[:\-]?\s*[а-яa-z]{2,}', text_lower) and re.search(r'\d{10,11}', text_lower):
+            name_match = re.search(r'(?:имя|зовут|меня зовут)\s*[:\-]?\s*([а-яa-z]{2,})', text_lower)
+            phone_match = re.search(r'(\d{10,11})', text_lower)
+            
+            if name_match and phone_match:
+                name = name_match.group(1).capitalize()
+                phone = phone_match.group(1)
+                response = save_application(name, phone, user_message)
+            else:
+                response = "❌ Не удалось распознать контакты. Укажите имя и телефон."
+        
+        # Расчет доставки (есть параметры)
+        elif (extract_weight(user_message) and extract_city(user_message)) or any(word in text_lower for word in ['рассчитай', 'посчитай', 'сколько', 'стоимость', 'доставк']):
+            response = process_delivery_request(user_message)
+        
+        # Общие вопросы - используем Gemini
+        else:
+            response = get_gemini_response(user_message, session.get('chat_history', []))
 
         # Сохраняем в историю
         session['chat_history'].append(f"Клиент: {user_message}")
-        session['chat_history'].append(f"Ассистент: {bot_response}")
+        session['chat_history'].append(f"Ассистент: {response}")
         
         if len(session['chat_history']) > 10:
             session['chat_history'] = session['chat_history'][-10:]
 
-        return jsonify({"response": bot_response})
+        return jsonify({"response": response})
 
     except Exception as e:
         logger.error(f"❌ Ошибка обработки сообщения: {e}")
@@ -805,7 +667,7 @@ def health_check():
         "timestamp": datetime.now().isoformat(),
         "gemini_configured": GEMINI_API_KEY is not None,
         "config_loaded": config is not None,
-        "model_with_tools": model_with_tools is not None
+        "model_initialized": model is not None
     })
 
 if __name__ == '__main__':
