@@ -372,7 +372,6 @@ def calculate_detailed_cost(quick_cost, weight, product_type, city):
 model = None
 
 try:
-    import google.generativeai as g; logger.info(f"🔧 Версия Gemini API: {g.__version__}")
     if GEMINI_API_KEY:
         genai.configure(api_key=GEMINI_API_KEY)
         # ИСПРАВЛЕННАЯ МОДЕЛЬ - используем gemini-pro
