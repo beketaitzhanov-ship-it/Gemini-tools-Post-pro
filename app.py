@@ -437,36 +437,31 @@ def get_aisulu_response_with_tools(user_message):
         # Создаем структурированные сообщения для Gemini
         messages = []
         
-        # 1. Добавляем системный промпт как первое сообщение
-        messages.append({
-            "role": "user",
-            "parts": [{"text": AISULU_PROMPT}]
-        })
+        # 1. Добавляем системный промпт как первое сообщение (только для первого сообщения в диалоге)
+        if len(chat_history) == 0:
+            messages.append({
+                "role": "user",
+                "parts": [{"text": AISULU_PROMPT}]
+            })
         
-        # 2. Добавляем историю диалога в правильном формате
+        # 2. Добавляем историю диалога в правильном формате (ИСПРАВЛЕНЫ ПРЕФИКСЫ)
         for i in range(0, len(chat_history), 2):
             if i < len(chat_history):
-                # Сообщение пользователя (исправляем префикс)
+                # Сообщение пользователя (ИСПРАВЛЕН ПРЕФИКС)
                 user_msg = chat_history[i]
-                if user_msg.startswith("Пользователь: "):
+                if user_msg.startswith("Клиент: "):
                     messages.append({
                         "role": "user", 
-                        "parts": [{"text": user_msg[14:]}]
-                    })
-                # ИЛИ если используется "Клиент: " (8 символов)
-                elif user_msg.startswith("Клиент: "):
-                    messages.append({
-                        "role": "user", 
-                        "parts": [{"text": user_msg[8:]}]
+                        "parts": [{"text": user_msg[8:]}]  # ИСПРАВЛЕН СРЕЗ
                     })
             
             if i + 1 < len(chat_history):
-                # Ответ Айсулу
+                # Ответ Айсулу (ИСПРАВЛЕН ПРЕФИКС)
                 assistant_msg = chat_history[i + 1]
                 if assistant_msg.startswith("Айсулу: "):
                     messages.append({
                         "role": "model",
-                        "parts": [{"text": assistant_msg[8:]}]
+                        "parts": [{"text": assistant_msg[8:]}]  # ИСПРАВЛЕН СРЕЗ
                     })
         
         # 3. Добавляем текущее сообщение пользователя
@@ -475,7 +470,6 @@ def get_aisulu_response_with_tools(user_message):
             "parts": [{"text": user_message}]
         })
         
-        # Исправляем GenerationConfig на словарь
         generation_config = {'temperature': 0.7}
         
         # Передаем структурированные сообщения в модель
@@ -484,47 +478,81 @@ def get_aisulu_response_with_tools(user_message):
             generation_config=generation_config
         )
         
-        # Проверяем, есть ли вызов функции в ответе
-        if hasattr(response, 'candidates') and response.candidates:
-            candidate = response.candidates[0]
-            if hasattr(candidate, 'content') and candidate.content:
-                if hasattr(candidate.content, 'parts') and candidate.content.parts:
-                    part = candidate.content.parts[0]
-                    
-                    # Проверяем, вызвал ли Gemini инструмент
-                    if hasattr(part, 'function_call') and part.function_call:
-                        function_call = part.function_call
-                        
-                        # Выполняем инструмент
-                        tool_result = execute_tool_function(
-                            function_call.name,
-                            dict(function_call.args)
-                        )
-                        
-                        # Создаем контент с результатом для обратного вызова
-                        function_response = {
-                            "role": "function",
-                            "parts": [{
-                                "function_response": {
-                                    "name": function_call.name,
-                                    "response": tool_result
-                                }
-                            }]
-                        }
-                        
-                        # Добавляем результат функции в историю и делаем финальный запрос
-                        updated_messages = messages + [candidate.content, function_response]
-                        
-                        final_response = model.generate_content(
-                            updated_messages,
-                            generation_config=generation_config
-                        )
-                        
-                        final_text = final_response.text if final_response.text else "Ой, что-то пошло не так! 😅"
-                        return final_text
+        # УНИВЕРСАЛЬНАЯ ОБРАБОТКА ЛЮБОГО ОТВЕТА ОТ GEMINI
+        final_text = ""
         
-        # Если вызова функции не было, возвращаем текстовый ответ
-        final_text = response.text if response.text else "Ой, не получилось ответить! Попробуйте еще раз. 🌸"
+        # Проверяем, есть ли кандидаты в ответе
+        if not hasattr(response, 'candidates') or not response.candidates:
+            return "Ой, не получилось обработать ответ! Попробуйте еще раз. 🌸"
+        
+        candidate = response.candidates[0]
+        if not hasattr(candidate, 'content') or not candidate.content:
+            return "Ой, пустой ответ от системы! 😅"
+        
+        # Проверяем части ответа
+        parts = candidate.content.parts
+        if not parts:
+            return "Ой, не получилось сформировать ответ! 🌸"
+        
+        first_part = parts[0]
+        
+        # СЛУЧАЙ 1: Gemini вызывает функцию (умный ответ)
+        if hasattr(first_part, 'function_call') and first_part.function_call:
+            function_call = first_part.function_call
+            logger.info(f"🔧 Gemini вызывает функцию: {function_call.name}")
+            
+            # Выполняем инструмент
+            tool_result = execute_tool_function(
+                function_call.name,
+                dict(function_call.args)
+            )
+            
+            # Создаем контент с результатом для обратного вызова
+            function_response = {
+                "role": "function", 
+                "parts": [{
+                    "function_response": {
+                        "name": function_call.name,
+                        "response": tool_result
+                    }
+                }]
+            }
+            
+            # Передаем результат функции обратно в Gemini для формирования красивого ответа
+            updated_messages = messages + [candidate.content, function_response]
+            
+            final_response = model.generate_content(
+                updated_messages,
+                generation_config=generation_config
+            )
+            
+            # Извлекаем финальный текст из ответа
+            if (hasattr(final_response, 'candidates') and final_response.candidates and
+                hasattr(final_response.candidates[0], 'content') and
+                final_response.candidates[0].content.parts):
+                
+                final_parts = final_response.candidates[0].content.parts
+                text_parts = []
+                for part in final_parts:
+                    if hasattr(part, 'text') and part.text:
+                        text_parts.append(part.text)
+                
+                if text_parts:
+                    final_text = " ".join(text_parts)
+                else:
+                    final_text = "✅ Расчет выполнен! Могу помочь с чем-то еще? 😊"
+            else:
+                final_text = "✅ Запрос обработан! Есть еще вопросы? 🌸"
+        
+        # СЛУЧАЙ 2: Простой текстовый ответ
+        elif hasattr(first_part, 'text') and first_part.text:
+            final_text = first_part.text
+        
+        # СЛУЧАЙ 3: Неизвестный формат ответа
+        else:
+            logger.warning(f"⚠️ Неизвестный формат ответа: {first_part}")
+            final_text = "Ой, что-то пошло не так! Попробуйте переформулировать вопрос. 🌸"
+        
         return final_text
         
     except Exception as e:
