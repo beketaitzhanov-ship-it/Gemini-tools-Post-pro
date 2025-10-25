@@ -374,7 +374,8 @@ model = None
 try:
     if GEMINI_API_KEY:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # ИСПРАВЛЕННАЯ МОДЕЛЬ - используем gemini-1.5-flash-latest
+        model = genai.GenerativeModel('gemini-1.5-flash-latest')
         logger.info("✅ Модель Gemini инициализирована")
         
 except Exception as e:
