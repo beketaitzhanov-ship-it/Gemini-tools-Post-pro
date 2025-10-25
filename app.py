@@ -125,7 +125,7 @@ try:
         
         # ИСПРАВЛЕНИЕ: используем актуальное имя модели
         model = genai.GenerativeModel(
-            'gemini-1.5-flash-latest',  # ← актуальная модель
+            'models/gemini-2.0-flash',  # ← актуальная модель
             tools=tools
         )
         logger.info("✅ Модель Gemini инициализирована с инструментами")
