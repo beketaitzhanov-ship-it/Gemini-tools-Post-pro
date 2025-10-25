@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, session
 import google.generativeai as genai
+from google.generativeai.types import Part  # ← ИСПРАВЛЕНО (убран лишний символ)
 from dotenv import load_dotenv
 
 # Настройка логирования
@@ -58,19 +59,6 @@ else:
     logger.error("⚠️ Приложение запускается с значениями по умолчанию")
     EXCHANGE_RATE, DESTINATION_ZONES, T1_RATES_DENSITY, T2_RATES, T2_RATES_DETAILED, PRODUCT_CATEGORIES = 550, {}, {}, {}, {}, {}
 
-# ===== ИНИЦИАЛИЗАЦИЯ GEMINI =====
-model = None
-
-try:
-    if GEMINI_API_KEY:
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('models/gemini-2.0-flash')
-        logger.info("✅ Модель Gemini инициализирована")
-    else:
-        logger.warning("⚠️ GEMINI_API_KEY не найден")
-except Exception as e:
-    logger.error(f"❌ Ошибка инициализации Gemini: {e}")
-
 # ===== ИНСТРУМЕНТЫ ДЛЯ GEMINI =====
 tools = [
     {
@@ -80,31 +68,31 @@ tools = [
             "type": "object",
             "properties": {
                 "weight_kg": {
-                    "type": "number", 
+                    "type": "number",
                     "description": "Общий вес груза в килограммах"
                 },
                 "city": {
-                    "type": "string", 
+                    "type": "string",
                     "description": "Город доставки в Казахстане: Алматы, Астана, Шымкент и др."
                 },
                 "product_type": {
-                    "type": "string", 
+                    "type": "string",
                     "description": "Тип товара: одежда, мебель, техника, косметика, автозапчасти и т.д."
                 },
                 "volume_m3": {
-                    "type": "number", 
+                    "type": "number",
                     "description": "Объем груза в кубических метрах"
                 },
                 "length_m": {
-                    "type": "number", 
+                    "type": "number",
                     "description": "Длина груза в метрах"
                 },
                 "width_m": {
-                    "type": "number", 
+                    "type": "number",
                     "description": "Ширина груза в метрах"
                 },
                 "height_m": {
-                    "type": "number", 
+                    "type": "number",
                     "description": "Высота груза в метрах"
                 }
             },
@@ -118,7 +106,7 @@ tools = [
             "type": "object",
             "properties": {
                 "tracking_number": {
-                    "type": "string", 
+                    "type": "string",
                     "description": "Трек-номер груза (начинается с GZ, IY, SZ)"
                 }
             },
@@ -129,7 +117,7 @@ tools = [
         "name": "get_delivery_terms",
         "description": "Получить информацию о сроках доставки",
         "parameters": {
-            "type": "object", 
+            "type": "object",
             "properties": {
                 "warehouse": {
                     "type": "string",
@@ -140,7 +128,7 @@ tools = [
         }
     },
     {
-        "name": "get_payment_methods", 
+        "name": "get_payment_methods",
         "description": "Получить список доступных способов оплаты",
         "parameters": {
             "type": "object",
@@ -159,7 +147,7 @@ tools = [
                     "description": "Имя клиента"
                 },
                 "phone": {
-                    "type": "string", 
+                    "type": "string",
                     "description": "Телефон клиента (10-11 цифр)"
                 },
                 "details": {
@@ -171,6 +159,25 @@ tools = [
         }
     }
 ]
+
+# ===== ИНИЦИАЛИЗАЦИЯ GEMINI =====
+model = None
+
+try:
+    if GEMINI_API_KEY:
+        genai.configure(api_key=GEMINI_API_KEY)
+        
+        # ← ГЛАВНОЕ ИСПРАВЛЕНИЕ: инициализация модели с инструментами и личностью
+        model = genai.GenerativeModel(
+            'models/gemini-2.0-flash',
+            tools=tools,  # ← Передаем инструменты здесь
+            system_instruction=AISULU_PROMPT  # ← Передаем личность Айсулу здесь
+        )
+        logger.info("✅ Модель Gemini инициализирована с инструментами и личностью Айсулу")
+    else:
+        logger.warning("⚠️ GEMINI_API_KEY не найден")
+except Exception as e:
+    logger.error(f"❌ Ошибка инициализации Gemini: {e}")
 
 # ===== ФУНКЦИИ-ОБРАБОТЧИКИ ИНСТРУМЕНТОВ =====
 def find_product_category(text):
@@ -258,15 +265,23 @@ def get_t2_cost_from_db(weight, zone):
 def calculate_quick_cost(weight, product_type, city, volume=None, length=None, width=None, height=None):
     """Основная функция расчета стоимости"""
     try:
-        if not volume and length and width and height:
-            volume = length * width * height
+        # Gemini может передать None для необязательных параметров
+        safe_length = length if length else 0
+        safe_width = width if width else 0
+        safe_height = height if height else 0
+        safe_volume = volume if volume else 0
+
+        if not safe_volume and safe_length and safe_width and safe_height:
+            safe_volume = safe_length * safe_width * safe_height
         
-        if not volume or volume <= 0:
-            return {"error": "Не удалось рассчитать объем"}
+        if not safe_volume or safe_volume <= 0:
+            # Просим Gemini уточнить
+            return {"error": "Не удалось рассчитать объем. Уточните у клиента габариты (длина, ширина, высота) или объем."}
         
-        rule, density = get_t1_rate_from_db(product_type, weight, volume)
+        rule, density = get_t1_rate_from_db(product_type, weight, safe_volume)
         if not rule:
-            return {"error": "Не найден подходящий тариф"}
+            # Просим Gemini уточнить, так как тариф не найден (возможно, плотность слишком низкая)
+             return {"error": f"Не найден подходящий тариф для плотности {density:.1f} кг/м³. Возможно, груз слишком легкий."}
         
         price = rule['price']
         unit = rule['unit']
@@ -274,14 +289,14 @@ def calculate_quick_cost(weight, product_type, city, volume=None, length=None, w
         if unit == "kg":
             cost_usd = price * weight
         else:
-            cost_usd = price * volume
+            cost_usd = price * safe_volume
         
         current_rate = EXCHANGE_RATE
         t1_cost_kzt = cost_usd * current_rate
         
         zone = find_destination_zone(city)
         if not zone:
-            return {"error": "Город не найден в зонах доставки"}
+            return {"error": f"Город {city} не найден в зонах доставки. Уточните у клиента город."}
         
         t2_cost_kzt = get_t2_cost_from_db(weight, str(zone))
         
@@ -293,7 +308,7 @@ def calculate_quick_cost(weight, product_type, city, volume=None, length=None, w
             't2_cost_kzt': t2_cost_kzt,
             'total_cost_kzt': total_cost,
             'zone': f"зона {zone}" if zone != "алматы" else "алматы",
-            'volume_m3': volume,
+            'volume_m3': safe_volume,
             'density_kg_m3': density,
             't1_cost_usd': cost_usd,
             'product_type': product_type,
@@ -310,16 +325,21 @@ def process_tracking_request(tracking_number):
     try:
         track_data = {}
         try:
+            # ПРИМЕЧАНИЕ: Этот файл должен существовать на сервере
             with open('guangzhou_track_data.json', 'r', encoding='utf-8') as f:
                 track_data = json.load(f)
-        except:
+        except FileNotFoundError:
+            logger.warning("Файл guangzhou_track_data.json не найден. Отслеживание невозможно.")
+            pass # track_data останется пустым
+        except Exception as e:
+            logger.error(f"Ошибка чтения guangzhou_track_data.json: {e}")
             pass
-        
+
         shipment = track_data.get(tracking_number)
         if shipment:
             status_emoji = {
                 "принят на складе": "🏭",
-                "в пути до границы": "🚚", 
+                "в пути до границы": "🚚",
                 "на границе": "🛃",
                 "в пути до алматы": "🚛",
                 "прибыл в алматы": "🏙️",
@@ -423,7 +443,6 @@ def get_payment_methods():
         logger.error(f"Ошибка получения способов оплаты: {e}")
         return {"error": f"Ошибка получения способов оплаты: {str(e)}"}
 
-# ===== ОСНОВНАЯ ЛОГИКА ОБРАБОТКИ С ИНСТРУМЕНТАМИ =====
 def execute_tool_function(function_name, parameters):
     """Выполняет функцию-инструмент по имени"""
     try:
@@ -463,32 +482,17 @@ def execute_tool_function(function_name, parameters):
         logger.error(f"❌ Ошибка выполнения инструмента {function_name}: {e}")
         return {"error": f"Ошибка выполнения: {str(e)}"}
 
+# ===== ОСНОВНАЯ ЛОГИКА ОБРАБОТКИ С ИНСТРУМЕНТАМИ =====
 def get_aisulu_response_with_tools(user_message):
     """Основная функция получения ответа от Айсулу с инструментами"""
     if not model:
         return "🤖 Сервис временно недоступен. Пожалуйста, попробуйте позже."
     
     try:
-        system_prompt = f"""
-{AISULU_PROMPT or "Ты - Айсулу, помощник по доставке из Китая в Казахстан. Отвечай дружелюбно, с казахским колоритом."}
-
-Ты имеешь доступ к следующим инструментам:
-- calculate_delivery_cost: для расчета стоимости доставки
-- track_shipment: для отслеживания грузов
-- get_delivery_terms: для получения информации о сроках
-- get_payment_methods: для получения способов оплаты
-- save_customer_application: для сохранения заявок
-
-Используй инструменты когда нужны точные данные из наших систем. 
-Отвечай как живой человек - дружелюбно, с эмодзи, на русском с казахским колоритом.
-"""
+        # ← ИСПРАВЛЕНИЕ 1: ПРОСТОЙ ВЫЗОВ
+        # Модель уже знает кто она (Айсулу) и какие у нее есть инструменты
+        response = model.generate_content(user_message)
         
-        response = model.generate_content(
-            contents=[system_prompt, user_message],
-            tools=tools
-        )
-        
-        # Проверяем, вызвал ли Gemini инструмент
         if (hasattr(response, 'candidates') and 
             response.candidates and 
             hasattr(response.candidates[0], 'content') and
@@ -496,27 +500,36 @@ def get_aisulu_response_with_tools(user_message):
             hasattr(response.candidates[0].content, 'parts') and
             response.candidates[0].content.parts):
             
-            for part in response.candidates[0].content.parts:
-                if hasattr(part, 'function_call') and part.function_call:
-                    function_call = part.function_call
-                    
-                    # Выполняем инструмент
-                    tool_result = execute_tool_function(
-                        function_call.name,
-                        dict(function_call.args)
-                    )
-                    
-                    # Передаем результат обратно Gemini для оформления ответа
-                    final_response = model.generate_content([
-                        system_prompt,
-                        f"Пользователь спросил: {user_message}",
-                        f"Ты вызвал инструмент {function_call.name} с результатом: {tool_result}",
-                        "Пожалуйста, оформи красивый ответ как Айсулу на основе этого результата."
-                    ])
-                    
-                    return final_response.text if final_response.text else "Ой, что-то пошло не так! 😅"
+            # Проверяем, есть ли в ответе вызов функции
+            part = response.candidates[0].content.parts[0]
+            if hasattr(part, 'function_call') and part.function_call:
+                function_call = part.function_call
+                
+                # Выполняем инструмент
+                tool_result = execute_tool_function(
+                    function_call.name,
+                    dict(function_call.args)
+                )
+                
+                # ← ИСПРАВЛЕНИЕ 2: ПРАВИЛЬНЫЙ RE-ACT
+                # Создаем Part с результатом выполнения функции
+                function_response_part = Part.from_function_response(
+                    name=function_call.name,
+                    response=tool_result
+                )
+
+                # Отправляем всю историю хода обратно в Gemini для генерации "живого" ответа
+                final_response = model.generate_content(
+                    [
+                        user_message,  # 1. Оригинальное сообщение пользователя
+                        response.candidates[0].content,  # 2. Ответ модели (с вызовом функции)
+                        function_response_part  # 3. Результат выполнения функции
+                    ]
+                )
+                
+                return final_response.text if final_response.text else "Ой, что-то пошло не так! 😅"
         
-        # Если инструменты не вызывались, возвращаем обычный ответ
+        # Если вызова функции не было, просто возвращаем текстовый ответ
         return response.text if response.text else "Ой, не получилось ответить! Попробуйте еще раз. 🌸"
         
     except Exception as e:
@@ -545,7 +558,7 @@ def chat():
         if 'chat_history' not in session:
             session['chat_history'] = []
 
-        # Обработка команды "Старт" (единственное что оставляем из старой логики)
+        # Обработка команды "Старт" 
         if user_message.lower() in ['старт', 'start', 'новый расчет', 'сброс', 'баста']:
             session.clear()
             session['chat_history'] = []
