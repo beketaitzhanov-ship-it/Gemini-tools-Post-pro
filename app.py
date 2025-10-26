@@ -717,19 +717,17 @@ def get_aisulu_response_with_tools(user_message):
             # Безопасная конвертация в dict
             model_request_content = candidate.content
             
-            # Создание response content
-            function_response_content = {
-                "role": "function",
-                "parts": [
-                    {
-                        "function_response": {
-                            "name": function_call.name,
-                            "response": json.dumps(tool_result) 
-                            # <-- ПРИНУДИТЕЛЬНЫЙ ПЕРЕЗАПУСК deploy
-                        }
-                    }
-                ]
-            }
+            # [ПРАВИЛЬНОЕ РЕШЕНИЕ] Создаем response content как объект genai.types.Content
+        function_response_content = genai.types.Content(
+            parts=[
+                genai.types.Part(
+                    function_response=genai.types.FunctionResponse(
+                        name=function_call.name,
+                        response=tool_result 
+                    )
+                )
+            ]
+        )
             
             # Безопасный финальный запрос
             updated_messages = messages + [model_request_content, function_response_content]
