@@ -1,6 +1,0 @@
-"#!/bin/bash"
-"echo '=== FORCE INSTALL 0.3.2 ==='"
-"pip cache purge"
-"pip uninstall -y google-generativeai"
-"pip install google-generativeai==0.3.2 --force-reinstall --no-cache-dir"
-"pip install -r requirements.txt"
