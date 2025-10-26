@@ -4,6 +4,8 @@ import json
 import logging
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, session
+from flask_session import Session  
+import redis                     
 import google.generativeai as genai
 import google.generativeai.types as genai_types
 from dotenv import load_dotenv
@@ -19,8 +21,21 @@ load_dotenv()
 GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 app = Flask(__name__)
-app.secret_key = os.getenv('SECRET_KEY', 'postpro-secret-key-2024')
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30)
+# ===== НАСТРОЙКА СЕРВЕРНОЙ СЕССИИ (REDIS) =====
+# 1. Загружаем URL Redis из переменных окружения
+REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379')
+
+# 2. Конфигурация сессии
+app.config['SESSION_TYPE'] = 'redis'
+app.config['SESSION_PERMANENT'] = True
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30) #
+app.config['SESSION_USE_SIGNER'] = True # Подписываем сессии для безопасности
+app.config['SESSION_REDIS'] = redis.from_url(REDIS_URL)
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'postpro-secret-key-2024') #
+
+# 3. Инициализируем Flask-Session
+Session(app)
+# ===== КОНЕЦ НАСТРОЙКИ СЕССИИ =====
 
 # ===== СИСТЕМА ЗАГРУЗКИ С МНОГОУРОВНЕВОЙ ОТКАЗОУСТОЙЧИВОСТЬЮ =====
 
