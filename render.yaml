@@ -1,7 +1,0 @@
-"services:" 
-"  - type: web" 
-"    name: gemini-tools-app" 
-"    env: python" 
-"    plan: free" 
-"    buildCommand: bash render-build.sh" 
-"    startCommand: gunicorn app:app" 
