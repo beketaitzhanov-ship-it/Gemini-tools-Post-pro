@@ -724,7 +724,7 @@ def get_aisulu_response_with_tools(user_message):
                     {
                         "function_response": {
                             "name": function_call.name,
-                            "response": tool_result 
+                            "response": json.dumps(tool_result) 
                         }
                     }
                 ]
