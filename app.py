@@ -715,11 +715,7 @@ def get_aisulu_response_with_tools(user_message):
             )
             
             # Безопасная конвертация в dict
-            try:
-                model_request_content = genai_types.to_dict(candidate.content)
-            except Exception as e:
-                logger.error(f"❌ Ошибка конвертации model content: {e}")
-                return get_fallback_response(user_message)
+            model_request_content = candidate.content
             
             # Создание response content
             function_response_content = {
