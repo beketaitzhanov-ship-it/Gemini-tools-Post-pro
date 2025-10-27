@@ -708,35 +708,43 @@ def get_aisulu_response_with_tools(user_message):
             logger.info("🤖 Gemini вызвал инструмент...")
             function_call = part.function_call
             
-            # Безопасное выполнение инструмента
+            # 1. Безопасное выполнение инструмента
             tool_result = execute_tool_function(
                 function_call.name,
                 dict(function_call.args) if hasattr(function_call, 'args') else {}
             )
             
-            # [ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ 1] Превращаем ОБЪЕКТ ответа модели (part) в СЛОВАРЬ (dict)
-            model_request_content = {
-                "role": "model", # Роль model, так как это ответ модели с вызовом функции
-                "parts": [{"function_call": {"name": function_call.name, "args": dict(function_call.args)}}]
-            }
+            # 2. Получаем запрос от модели (role: model)
+            #    Это candidate.content, он уже в формате genai.types.Content
+            model_request_content = candidate.content
             
-            # [ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ 2] Создаем ответ инструмента ТОЖЕ как СЛОВАРЬ (dict)
-            function_response_content = {
-                "role": "function", # Роль function, это ответ от вашего кода
-                "parts": [{"function_response": {"name": function_call.name, "response": tool_result}}]
-            }
+            # 3. [ИСПРАВЛЕНИЕ] 
+            #    Создаем корректный ответ (role: function),
+            #    который содержит РЕЗУЛЬТАТ (tool_result)
             
-            # Безопасный финальный запрос (теперь messages - список dict, и мы добавляем еще два dict)
+            function_response_content = genai.types.Content(
+                parts=[
+                    genai.types.Part(
+                        function_response=genai.types.FunctionResponse(
+                            name=function_call.name,
+                            response=tool_result  # <--- Помещаем сюда результат
+                        )
+                    )
+                ],
+                role="function" # <--- Обязательно указываем роль "function"
+            )
+            
+            # 4. Собираем обновленную историю для следующего запроса
             updated_messages = messages + [model_request_content, function_response_content]
             
+            # 5. Делаем финальный запрос к Gemini с результатом функции
             try:
-                # ВАЖНО: Передаем именно список словарей updated_messages
-                final_response = model.generate_content(
-                    updated_messages, # <--- Убедитесь, что передаете этот список dict
-                    generation_config={'temperature': 0.7}
+                final_response = model.generate_content(
+                    updated_messages,
+                    generation_config={'temperature': 0.7}
                 )
                 
-                # Безопасное извлечение текста (остается как было)
+                # 6. Безопасное извлечение текста
                 if (hasattr(final_response, 'candidates') and final_response.candidates and
                     hasattr(final_response.candidates[0], 'content') and final_response.candidates[0].content and
                     hasattr(final_response.candidates[0].content, 'parts') and final_response.candidates[0].content.parts and
@@ -745,14 +753,14 @@ def get_aisulu_response_with_tools(user_message):
                     final_text = final_response.candidates[0].content.parts[0].text
                     return final_text
                 else:
-                    # Добавляем больше деталей в лог, если структура ответа не та
-                    logger.error(f"❌ Не удалось извлечь текст. Структура ответа: {final_response}")
-                    return "✅ Расчет выполнен! К сожалению, не могу отобразить детали. Пожалуйста, свяжитесь с менеджером."
+                    logger.error("❌ Не удалось извлечь текст из финального ответа")
+                    # Возвращаем результат tool_result в виде JSON, если модель не смогла его озвучить
+                    return f"✅ Расчет выполнен: {json.dumps(tool_result, ensure_ascii=False)}"
                     
             except Exception as e:
-                # Логируем полную ошибку
-                logger.error(f"❌ Ошибка финального запроса: {e}", exc_info=True) 
-                return "✅ Расчет выполнен! Для получения деталей свяжитесь с менеджером."
+                logger.error(f"❌ Ошибка финального запроса: {e}")
+                # Возвращаем хотя бы результат расчета
+                return f"✅ Расчет выполнен! {json.dumps(tool_result, ensure_ascii=False)}"
 
         # Сценарий 2: Gemini отвечает текстом
         elif hasattr(part, 'text'):
