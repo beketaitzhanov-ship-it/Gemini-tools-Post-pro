@@ -739,11 +739,13 @@ def get_aisulu_response_with_tools(user_message):
             
             # 5. Делаем финальный запрос к Gemini с результатом функции
             try:
-                final_response = model.generate_content(
-                    updated_messages,
-                    generation_config={'temperature': 0.7}
+                # Этот код ВНУТРИ 'try', поэтому отступ 16 пробелов
+                final_response = model.generate_content(
+                    updated_messages,
+                    generation_config={'temperature': 0.7}
                 )
                 
+                # Этот код (Шаг 6) ТОЖЕ ВНУТРИ 'try'
                 # 6. Безопасное извлечение текста
                 if (hasattr(final_response, 'candidates') and final_response.candidates and
                     hasattr(final_response.candidates[0], 'content') and final_response.candidates[0].content and
