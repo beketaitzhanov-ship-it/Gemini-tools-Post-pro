@@ -719,27 +719,59 @@ def get_aisulu_response_with_tools(user_message):
             model_request_content = candidate.content
             
             # 3. [ИСПРАВЛЕНИЕ] 
-            #    Создаем корректный ответ (role: function) в виде СЛОВАРЯ,
-            #    чтобы избежать ошибки 'AttributeError: ... has no attribute 'Content''
+            #    Создаем корректный ответ (role: function),
+            #    который содержит РЕЗУЛЬТАТ (tool_result)
             
+            function_response_content = genai.Content( # <--- ❌ ЭТО ВЫЗЫВАЕТ ОШИБКУ СМЕШАННОГО СПИСКА
+                parts=[
+                    genai.types.Part( 
+                        function_response=genai.types.FunctionResponse(
+...
+2. Полностью замените этот блок на следующий исправленный код:
+
+(Здесь мы используем genai_types.to_dict() для конвертации объекта ответа модели в словарь, а ответ функции сразу создаем как словарь).
+
+Python
+
+            # 1. Безопасное выполнение инструмента
+            tool_result = execute_tool_function(
+                function_call.name,
+                dict(function_call.args) if hasattr(function_call, 'args') else {}
+            )
+            
+            # 2. Получаем запрос от модели (role: model)
+            #    [ИСПРАВЛЕНИЕ 1] Конвертируем ОБЪЕКТ (candidate.content) в СЛОВАРЬ (dict)
+            #    чтобы избежать ошибки "смешанного списка" (list[dict] + list[Content])
+            try:
+                # Используем псевдоним genai_types, который у вас уже импортирован (L13)
+                model_request_dict = genai_types.to_dict(candidate.content)
+            except Exception as e:
+                logger.warning(f"⚠️ Не удалось конвертировать model_request в dict: {e}")
+                # Ручной Fallback на dict, если to_dict не сработает
+                model_request_dict = {
+                    "role": "model",
+                    "parts": [{"function_call": {"name": function_call.name, "args": dict(function_call.args)}}]
+                }
+
+            # 3. [ИСПРАВЛЕНИЕ 2] 
+            #    Создаем корректный ответ (role: function) тоже в виде СЛОВАРЯ (dict)
             function_response_content = {
                 "role": "function",
                 "parts": [
-                    {
-                        "function_response": {
+                    { # Это 'Part'
+                        "function_response": { # Это 'FunctionResponse'
                             "name": function_call.name,
-                            "response": tool_result
+                            "response": tool_result 
                         }
                     }
                 ]
             }
             
-            # 4. Собираем обновленную историю для следующего запроса
-            updated_messages = messages + [model_request_content, function_response_content]
+            # 4. Собираем обновленную историю (теперь это список СЛОВАРЕЙ)
+            updated_messages = messages + [model_request_dict, function_response_content]
             
-            # 5. Делаем финальный запрос к Gemini с результатом функции
+            # 5. Делаем финальный запрос к Gemini (теперь он примет list[dict])
             try:
-                # Этот код ВНУТРИ 'try', поэтому отступ 16 пробелов
                 final_response = model.generate_content(
                     updated_messages,
                     generation_config={'temperature': 0.7}
