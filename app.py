@@ -714,31 +714,29 @@ def get_aisulu_response_with_tools(user_message):
                 dict(function_call.args) if hasattr(function_call, 'args') else {}
             )
             
-            # Безопасная конвертация в dict
-            model_request_content = candidate.content
+            # [ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ 1] Превращаем ОБЪЕКТ ответа модели (part) в СЛОВАРЬ (dict)
+            model_request_content = {
+                "role": "model", # Роль model, так как это ответ модели с вызовом функции
+                "parts": [{"function_call": {"name": function_call.name, "args": dict(function_call.args)}}]
+            }
             
-            # [ПРАВИЛЬНОЕ РЕШЕНИЕ] Создаем response content как объект genai.types.Content
-            function_response_content = genai.types.Content(
-                parts=[
-                    genai.types.Part(
-                        function_response=genai.types.FunctionResponse(
-                            name=function_call.name,
-                            response=tool_result 
-                        )
-                    )
-                ]
-            )
+            # [ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ 2] Создаем ответ инструмента ТОЖЕ как СЛОВАРЬ (dict)
+            function_response_content = {
+                "role": "function", # Роль function, это ответ от вашего кода
+                "parts": [{"function_response": {"name": function_call.name, "response": tool_result}}]
+            }
             
-            # Безопасный финальный запрос
+            # Безопасный финальный запрос (теперь messages - список dict, и мы добавляем еще два dict)
             updated_messages = messages + [model_request_content, function_response_content]
             
             try:
+                # ВАЖНО: Передаем именно список словарей updated_messages
                 final_response = model.generate_content(
-                    updated_messages,
+                    updated_messages, # <--- Убедитесь, что передаете этот список dict
                     generation_config={'temperature': 0.7}
                 )
                 
-                # Безопасное извлечение текста
+                # Безопасное извлечение текста (остается как было)
                 if (hasattr(final_response, 'candidates') and final_response.candidates and
                     hasattr(final_response.candidates[0], 'content') and final_response.candidates[0].content and
                     hasattr(final_response.candidates[0].content, 'parts') and final_response.candidates[0].content.parts and
@@ -747,11 +745,13 @@ def get_aisulu_response_with_tools(user_message):
                     final_text = final_response.candidates[0].content.parts[0].text
                     return final_text
                 else:
-                    logger.error("❌ Не удалось извлечь текст из финального ответа")
-                    return "✅ Расчет выполнен! К сожалению, не могу отобразить детали. Пожалуйста, свяжите-пожалуйста, свяжитесь с менеджером."
+                    # Добавляем больше деталей в лог, если структура ответа не та
+                    logger.error(f"❌ Не удалось извлечь текст. Структура ответа: {final_response}")
+                    return "✅ Расчет выполнен! К сожалению, не могу отобразить детали. Пожалуйста, свяжитесь с менеджером."
                     
             except Exception as e:
-                logger.error(f"❌ Ошибка финального запроса: {e}")
+                # Логируем полную ошибку
+                logger.error(f"❌ Ошибка финального запроса: {e}", exc_info=True) 
                 return "✅ Расчет выполнен! Для получения деталей свяжитесь с менеджером."
 
         # Сценарий 2: Gemini отвечает текстом
