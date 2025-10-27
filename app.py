@@ -719,20 +719,20 @@ def get_aisulu_response_with_tools(user_message):
             model_request_content = candidate.content
             
             # 3. [ИСПРАВЛЕНИЕ] 
-            #    Создаем корректный ответ (role: function),
-            #    который содержит РЕЗУЛЬТАТ (tool_result)
+            #    Создаем корректный ответ (role: function) в виде СЛОВАРЯ,
+            #    чтобы избежать ошибки 'AttributeError: ... has no attribute 'Content''
             
-            function_response_content = genai.types.Content(
-                parts=[
-                    genai.types.Part(
-                        function_response=genai.types.FunctionResponse(
-                            name=function_call.name,
-                            response=tool_result  # <--- Помещаем сюда результат
-                        )
-                    )
-                ],
-                role="function" # <--- Обязательно указываем роль "function"
-            )
+            function_response_content = {
+                "role": "function",
+                "parts": [
+                    {
+                        "function_response": {
+                            "name": function_call.name,
+                            "response": tool_result
+                        }
+                    }
+                ]
+            }
             
             # 4. Собираем обновленную историю для следующего запроса
             updated_messages = messages + [model_request_content, function_response_content]
