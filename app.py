@@ -718,24 +718,18 @@ def get_aisulu_response_with_tools(user_message):
             model_request_content = candidate.content
             
             # [ПРАВИЛЬНОЕ РЕШЕНИЕ] Создаем response content как объект genai.types.Content
-        function_response_content = genai.types.Content(
-            parts=[
-                genai.types.Part(
-                    function_response=genai.types.FunctionResponse(
-                        name=function_call.name,
-                        response=tool_result 
-                    )
-                )
-            ]
-        )
-            
-            # Безопасный финальный запрос
-            updated_messages = messages + [model_request_content, function_response_content]
-            
-            try:
-                final_response = model.generate_content(
-                    updated_messages,
-                    generation_config={'temperature': 0.7}
+        function_response_content = genai.types.Content(
+           # ... (содержимое genai.types.Content) ...
+        )
+        
+        # [ИСПРАВЛЕНО] (Отступ тот же, что и у function_response_content)
+        updated_messages = messages + [model_request_content, function_response_content]
+        
+        # [ИСПРАВЛЕНО] (Отступ тот же, что и у function_response_content)
+        try:
+            final_response = model.generate_content(
+                updated_messages,
+                generation_config={'temperature': 0.7}
                 )
                 
                 # Безопасное извлечение текста
