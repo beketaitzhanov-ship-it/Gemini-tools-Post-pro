@@ -517,6 +517,4 @@ class GuangzhouBot:
         else:
             logger.error("❌ Бот не настроен!")
 
-if __name__ == '__main__':
-    bot = GuangzhouBot()
-    bot.run()
+
