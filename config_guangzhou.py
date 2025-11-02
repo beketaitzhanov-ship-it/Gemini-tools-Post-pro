@@ -1,34 +1,596 @@
-GUANGZHOU_CONFIG = {
-    "warehouse_name": "Гуанчжоу",
-    "warehouse_city": "Гуанчжоу, Китай",
-    "warehouse_coords": (23.1291, 113.2644),
-    "track_prefix": "GZ",
+import os
+import logging
+import json
+import random
+import threading
+import time
+from datetime import datetime, timedelta
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
+from dotenv import load_dotenv
+
+# Загружаем настройки Гуанчжоу
+from config_guangzhou import GUANGZHOU_CONFIG
+
+# Настройка логирования
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# Загрузка переменных окружения
+load_dotenv()
+TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+
+# Состояния для диалога
+WAITING_FIO, WAITING_PRODUCT, WAITING_WEIGHT, WAITING_VOLUME, WAITING_PHONE = range(5)
+
+class GuangzhouBot:
+    def __init__(self):
+        self.token = TOKEN
+        self.config = GUANGZHOU_CONFIG
+        self.data_file = "data/guangzhou_track_data.json"
+        self.application = None
+        self.deadline_tasks = {}
+        self.setup_bot()
+        self.setup_deadline_checker()
     
-    # Маршрут из Гуанчжоу в Алматы
-    "route": [
-        {"city": "Гуанчжоу", "day": 0, "progress": 0},
-        {"city": "Наньчан", "day": 2, "progress": 15},
-        {"city": "Ухань", "day": 4, "progress": 30},
-        {"city": "Сиань", "day": 6, "progress": 46},
-        {"city": "Ланьчжоу", "day": 8, "progress": 61},
-        {"city": "Урумчи", "day": 10, "progress": 76},
-        {"city": "Хоргос (граница)", "day": 12, "progress": 85, "is_border": True},
-        {"city": "Алматы", "day": 15, "progress": 100}
-    ],
+    def setup_bot(self):
+        """Настройка бота"""
+        if not self.token:
+            logger.error("❌ Токен бота не найден! Проверьте файл .env")
+            return
+        
+        self.application = Application.builder().token(self.token).build()
+        self.setup_handlers()
     
-    # Статусы для этого склада
-    "statuses": {
-        "принят на складе": "🏭 Принят на складе Гуанчжоу",
-        "в пути до границы": "🚚 В пути до границы", 
-        "на границе": "🛃 На границе Хоргос",
-        "в пути до алматы": "🚛 В пути до Алматы",
-        "прибыл в алматы": "🏙️ Прибыл в Алматы",
-        "доставлен": "✅ Доставлен"
-    },
+    def setup_handlers(self):
+        """Настройка обработчиков команд"""
+        # Команда /start
+        self.application.add_handler(CommandHandler("start", self.start_command))
+        
+        # Обработчик создания нового груза
+        conv_handler = ConversationHandler(
+            entry_points=[MessageHandler(filters.Regex('^(➕ НОВЫЙ ГРУЗ)$'), self.new_shipment_start)],
+            states={
+                WAITING_FIO: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.get_fio)],
+                WAITING_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.get_product)],
+                WAITING_WEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.get_weight)],
+                WAITING_VOLUME: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.get_volume)],
+                WAITING_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.get_phone)],
+            },
+            fallbacks=[CommandHandler('cancel', self.cancel_command)]
+        )
+        
+        self.application.add_handler(conv_handler)
+        
+        # Обработчики быстрых действий
+        self.application.add_handler(MessageHandler(filters.Regex('^(📦 МОИ ГРУЗЫ)$'), self.my_shipments))
+        self.application.add_handler(MessageHandler(filters.Regex('^(🚚 ОТПРАВЛЕНО)$'), self.quick_sent))
+        self.application.add_handler(MessageHandler(filters.Regex('^(🛃 НА ГРАНИЦЕ)$'), self.quick_border))
+        self.application.add_handler(MessageHandler(filters.Regex('^(✅ ДОСТАВЛЕНО)$'), self.quick_delivered))
+        
+        # Обработчик трек-номеров
+        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_track_number))
     
-    # Дедлайны для менеджера (в днях)
-    "deadlines": {
-        "processing_time": 2,  # 2 дня на обработку груза
-        "reminder_hours": [10, 18]  # Напоминания в 10:00 и 18:00
-    }
-}
+    def setup_deadline_checker(self):
+        """Запуск проверки дедлайнов"""
+        def deadline_checker():
+            while True:
+                try:
+                    self.check_shipment_deadlines()
+                    time.sleep(3600)  # Проверка каждый час
+                except Exception as e:
+                    logger.error(f"Ошибка проверки дедлайнов: {e}")
+                    time.sleep(300)  # Ждем 5 минут при ошибке
+        
+        thread = threading.Thread(target=deadline_checker, daemon=True)
+        thread.start()
+    
+    def check_shipment_deadlines(self):
+        """Проверка дедлайнов по грузам"""
+        try:
+            shipments = self.get_all_shipments()
+            current_time = datetime.now()
+            
+            for track_number, shipment in shipments.items():
+                if shipment.get('status') == 'принят на складе':
+                    created_at = datetime.fromisoformat(shipment['created_at'])
+                    deadline = created_at + timedelta(days=self.config['deadlines']['processing_time'])
+                    
+                    if current_time > deadline and not shipment.get('deadline_notified'):
+                        logger.warning(f"🚨 ПРОСРОЧКА: {track_number} - менеджер {shipment.get('manager')}")
+                        shipment['deadline_notified'] = True
+                        shipment['deadline_missed'] = True
+                        self.save_shipment_data(track_number, shipment)
+                    
+                    elif current_time > deadline - timedelta(hours=12) and not shipment.get('reminder_sent'):
+                        logger.info(f"⏰ Напоминание: {track_number} - дедлайн через 12 часов")
+                        shipment['reminder_sent'] = True
+                        self.save_shipment_data(track_number, shipment)
+                        
+        except Exception as e:
+            logger.error(f"Ошибка проверки дедлайнов: {e}")
+    
+    def generate_track_number(self):
+        """Генерация трек-номера для Гуанчжоу"""
+        number = random.randint(100000, 999999)
+        return f"GZ{number}"
+
+    def save_shipment_data(self, track_number, data):
+        """Сохранение данных груза в файл Гуанчжоу"""
+        try:
+            if os.path.exists(self.data_file):
+                with open(self.data_file, 'r', encoding='utf-8') as f:
+                    all_data = json.load(f)
+            else:
+                all_data = {}
+            
+            all_data[track_number] = data
+            
+            with open(self.data_file, 'w', encoding='utf-8') as f:
+                json.dump(all_data, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"✅ Груз {track_number} сохранен в {self.data_file}")
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка сохранения: {e}")
+            
+    def load_shipment_data(self, track_number):
+        """Загрузка данных груза из файла Гуанчжоу"""
+        try:
+            if not os.path.exists(self.data_file):
+                return None
+            
+            with open(self.data_file, 'r', encoding='utf-8') as f:
+                all_data = json.load(f)
+            
+            return all_data.get(track_number)
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка загрузки: {e}")
+            return None
+    
+    def get_all_shipments(self):
+        """Получение всех грузов Гуанчжоу"""
+        try:
+            if os.path.exists(self.data_file):
+                with open(self.data_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            return {}
+        except Exception as e:
+            logger.error(f"❌ Ошибка загрузки всех грузов: {e}")
+            return {}
+
+    def get_route_map(self, shipment):
+        """Создает визуальную карту маршрута"""
+        warehouse = shipment.get('warehouse', 'GZ')
+        current_progress = shipment.get('route_progress', 0)
+        
+        if warehouse == "Иу":
+            route = [
+                {"city": "🏭 Иу", "progress": 0},
+                {"city": "📍 Ханчжоу", "progress": 20},
+                {"city": "📍 Нанкин", "progress": 40},
+                {"city": "📍 Сиань", "progress": 60},
+                {"city": "📍 Ланьчжоу", "progress": 75},
+                {"city": "📍 Урумчи", "progress": 85},
+                {"city": "🛃 Хоргос", "progress": 92},
+                {"city": "🏙️ Алматы", "progress": 100}
+            ]
+        else:  # Гуанчжоу
+            route = [
+                {"city": "🏭 Гуанчжоу", "progress": 0},
+                {"city": "📍 Наньчан", "progress": 15},
+                {"city": "📍 Ухань", "progress": 30},
+                {"city": "📍 Сиань", "progress": 46},
+                {"city": "📍 Ланьчжоу", "progress": 61},
+                {"city": "📍 Урумчи", "progress": 76},
+                {"city": "🛃 Хоргос", "progress": 85},
+                {"city": "🏙️ Алматы", "progress": 100}
+            ]
+        
+        map_text = "🗺️ **МАРШРУТ ДОСТАВКИ:**\n\n"
+        
+        for point in route:
+            if current_progress >= point['progress']:
+                map_text += f"✅ {point['city']}\n"
+            else:
+                map_text += f"⏳ {point['city']}\n"
+        
+        # Прогресс-бар
+        bars = 10
+        filled = int(bars * current_progress / 100)
+        empty = bars - filled
+        progress_bar = "🟩" * filled + "⬜" * empty
+        
+        map_text += f"\n📊 **Прогресс:** {progress_bar} {current_progress}%"
+        
+        return map_text
+    
+    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда /start - главное меню"""
+        user = update.message.from_user
+        
+        keyboard = [
+            [KeyboardButton("➕ НОВЫЙ ГРУЗ")],
+            [KeyboardButton("📦 МОИ ГРУЗЫ")],
+            [KeyboardButton("🚚 ОТПРАВЛЕНО"), KeyboardButton("🛃 НА ГРАНИЦЕ")],
+            [KeyboardButton("✅ ДОСТАВЛЕНО")]
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        
+        welcome_text = f"""
+🏭 **POST PRO | СКЛАД ГУАНЧЖОУ**
+
+👤 **Менеджер:** {user.first_name}
+📍 **Локация:** {self.config['warehouse_city']}
+
+━━━━━━━━━━━━━━━━━━━━
+📋 **ОСНОВНЫЕ ДЕЙСТВИЯ**
+
+➕ НОВЫЙ ГРУЗ - Принять груз на склад
+📦 МОИ ГРУЗЫ - Список активных грузов
+
+⚡ **БЫСТРЫЕ СТАТУСЫ**
+
+🚚 ОТПРАВЛЕНО - Груз в пути
+🛃 НА ГРАНИЦЕ - На границе  
+✅ ДОСТАВЛЕНО - Доставлен
+
+💡 **Формат трек-номера:** GZ123456
+"""
+        
+        await update.message.reply_text(welcome_text, reply_markup=reply_markup)
+    
+    async def new_shipment_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Начало создания нового груза"""
+        await update.message.reply_text(
+            "🏭 **НОВЫЙ ГРУЗ - СКЛАД ГУАНЧЖОУ**\n\n"
+            "👤 Введите ФИО получателя:\n"
+            "Пример: 'Иванов Иван Иванович'"
+        )
+        return WAITING_FIO
+
+    async def get_fio(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Получение ФИО"""
+        fio = update.message.text
+        context.user_data['fio'] = fio
+        
+        await update.message.reply_text(
+            f"✅ ФИО: {fio}\n\n"
+            "📦 Введите название товара:\n"
+            "Пример: 'Мебель из Икеа', 'Электроника Xiaomi'"
+        )
+        return WAITING_PRODUCT
+
+    async def get_product(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Получение названия товара"""
+        product = update.message.text
+        context.user_data['product'] = product
+        
+        await update.message.reply_text(
+            f"✅ Товар: {product}\n\n"
+            "⚖️ Введите вес груза (кг):\n"
+            "Пример: 150"
+        )
+        return WAITING_WEIGHT
+
+    async def get_weight(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Получение веса"""
+        try:
+            weight = float(update.message.text)
+            context.user_data['weight'] = weight
+            
+            await update.message.reply_text(
+                f"✅ Вес: {weight} кг\n\n"
+                "📏 Введите объем груза (м³):\n"
+                "Пример: 2.5"
+            )
+            return WAITING_VOLUME
+        except ValueError:
+            await update.message.reply_text("❌ Введите число для веса:")
+            return WAITING_WEIGHT
+
+    async def get_volume(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Получение объема"""
+        try:
+            volume = float(update.message.text)
+            context.user_data['volume'] = volume
+            
+            await update.message.reply_text(
+                f"✅ Объем: {volume} м³\n\n"
+                "📞 Введите номер телефона клиента:\n"
+                "Пример: '+77001234567'"
+            )
+            return WAITING_PHONE
+        except ValueError:
+            await update.message.reply_text("❌ Введите число для объема:")
+            return WAITING_VOLUME
+
+    async def get_phone(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Получение телефона и завершение создания"""
+        phone = update.message.text
+        context.user_data['phone'] = phone
+    
+        # Генерируем трек-номер
+        track_number = self.generate_track_number()
+    
+        # Сохраняем данные
+        shipment_data = {
+            "track_number": track_number,
+            "fio": context.user_data['fio'],
+            "product": context.user_data['product'],
+            "weight": context.user_data['weight'],
+            "volume": context.user_data['volume'],
+            "phone": context.user_data['phone'],
+            "status": "принят на складе",
+            "warehouse": self.config['warehouse_name'],
+            "manager": update.message.from_user.first_name,
+            "manager_chat_id": update.message.chat_id,
+            "created_at": datetime.now().isoformat(),
+            "route_progress": 0,
+            "deadline_notified": False,
+            "reminder_sent": False,
+            "deadline_missed": False
+        }
+    
+        self.save_shipment_data(track_number, shipment_data)
+        context.user_data.clear()
+    
+        # Показываем главное меню
+        await self.start_command(update, context)
+    
+        # Сообщаем о создании с информацией о дедлайне
+        deadline = datetime.now() + timedelta(days=self.config['deadlines']['processing_time'])
+    
+        await update.message.reply_text(
+            f"🎉 **НОВЫЙ ГРУЗ СОЗДАН!**\n\n"
+            f"🔢 Трек-номер: {track_number}\n"
+            f"👤 Клиент: {shipment_data['fio']}\n"
+            f"📦 Товар: {shipment_data['product']}\n\n"
+            f"⏰ **ДЕДЛАЙН ОТПРАВКИ:**\n"
+            f"📅 {deadline.strftime('%d.%m.%Y %H:%M')}\n"
+            f"⏱️ Осталось: {self.config['deadlines']['processing_time']} дней\n\n"
+            f"🚚 Нажмите 'ОТПРАВЛЕНО' до истечения срока!"
+        )
+    
+        return ConversationHandler.END
+
+    async def cancel_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Отмена операции"""
+        context.user_data.clear()
+        await update.message.reply_text("❌ Операция отменена.")
+        await self.start_command(update, context)
+        return ConversationHandler.END
+
+    async def my_shipments(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Список моих грузов"""
+        shipments = self.get_all_shipments()
+        
+        if not shipments:
+            await update.message.reply_text(
+                "📦 **НЕТ АКТИВНЫХ ГРУЗОВ**\n\n"
+                "Создайте первый груз с помощью кнопки\n"
+                "👇 **➕ НОВЫЙ ГРУЗ**"
+            )
+            return
+        
+        response = "📦 **ВАШИ АКТИВНЫЕ ГРУЗЫ**\n\n"
+        
+        for track_number, shipment in list(shipments.items())[:8]:
+            status_emoji = {
+                "принят на складе": "🏭",
+                "в пути до границы": "🚚",
+                "на границе": "🛃", 
+                "в пути до алматы": "🚛",
+                "прибыл в алматы": "🏙️",
+                "доставлен": "✅"
+            }.get(shipment.get('status', ''), '📦')
+            
+            indicators = ""
+            if shipment.get('deadline_missed'):
+                indicators = " 🔴"
+            elif shipment.get('status') == 'принят на складе':
+                created_at = datetime.fromisoformat(shipment['created_at'])
+                deadline = created_at + timedelta(days=self.config['deadlines']['processing_time'])
+                if datetime.now() > deadline - timedelta(hours=12):
+                    indicators = " 🟡"
+            
+            response += f"{status_emoji} **{track_number}**{indicators}\n"
+            response += f"   👤 {shipment.get('fio', 'Не указано')}\n"
+            response += f"   📦 {shipment.get('product', 'Не указано')}\n"
+            response += f"   📅 {shipment.get('created_at', '')[:10]}\n"
+            response += f"   ──────────────────\n"
+        
+        if len(shipments) > 8:
+            response += f"\n📊 ... и еще {len(shipments) - 8} грузов"
+        
+        await update.message.reply_text(response)
+
+    async def quick_sent(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Быстрая установка статуса 'отправлено'"""
+        context.user_data['quick_action'] = 'sent'
+        await update.message.reply_text(
+            "🚚 **ОТПРАВКА ГРУЗА**\n\n"
+            "Введите трек-номер груза (GZ123456):"
+        )
+
+    async def quick_border(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Быстрая установка статуса 'на границе'"""
+        context.user_data['quick_action'] = 'border'
+        await update.message.reply_text(
+            "🛃 **ГРУЗ НА ГРАНИЦЕ**\n\n"
+            "Введите трек-номер груза (GZ123456):"
+        )
+
+    async def quick_delivered(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Быстрая установка статуса 'доставлено'"""
+        context.user_data['quick_action'] = 'delivered'
+        await update.message.reply_text(
+            "✅ **ДОСТАВКА ГРУЗА**\n\n"
+            "Введите трек-номер груза (GZ123456):"
+        )
+
+    async def handle_track_number(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка трек-номеров"""
+        track_number = update.message.text.strip().upper()
+        
+        if not (track_number.startswith('GZ') and len(track_number) == 8 and track_number[2:].isdigit()):
+            await update.message.reply_text(
+                "❌ Неверный формат трек-номера.\n"
+                "Трек-номер Гуанчжоу: GZ123456\n\n"
+                "Используйте кнопки меню для навигации."
+            )
+            return
+        
+        shipment = self.load_shipment_data(track_number)
+        if not shipment:
+            await update.message.reply_text(
+                f"❌ Груз {track_number} не найден.\n"
+                "Проверьте трек-номер или создайте новый груз."
+            )
+            return
+        
+        if 'quick_action' in context.user_data:
+            action = context.user_data['quick_action']
+            
+            if action == 'sent':
+                await self.update_status_sent(update, track_number, shipment)
+            elif action == 'border':
+                await self.update_status_border(update, track_number, shipment)
+            elif action == 'delivered':
+                await self.update_status_delivered(update, track_number, shipment)
+            
+            context.user_data.pop('quick_action', None)
+        else:
+            await self.show_shipment_info(update, shipment)
+
+    async def update_status_sent(self, update: Update, track_number: str, shipment: dict):
+        """Обновление статуса на 'отправлено'"""
+        shipment['status'] = "в пути до границы"
+        shipment['route_progress'] = 10
+        self.save_shipment_data(track_number, shipment)
+        
+        response = f"""
+🚚 **ГРУЗ ОТПРАВЛЕН!**
+
+┌────────────────────────────
+│ 📦 **Трек-номер:** {track_number}
+│ 👤 **Клиент:** {shipment.get('fio', 'Не указано')}
+│ 📍 **Статус:** В пути до границы
+│ 🛣️ **Маршрут:** Гуанчжоу → Хоргос
+└────────────────────────────
+"""
+        
+        route_map = self.get_route_map(shipment)
+        response += f"\n{route_map}"
+        response += "\n✅ Груз начал движение из Гуанчжоу"
+        
+        await update.message.reply_text(response)
+
+    async def update_status_border(self, update: Update, track_number: str, shipment: dict):
+        """Обновление статуса на 'на границе'"""
+        shipment['status'] = "на границе"
+        shipment['route_progress'] = 85
+        self.save_shipment_data(track_number, shipment)
+        
+        response = f"""
+🛃 **ГРУЗ НА ГРАНИЦЕ!**
+
+┌────────────────────────────
+│ 📦 **Трек-номер:** {track_number}
+│ 👤 **Клиент:** {shipment.get('fio', 'Не указано')}
+│ 📍 **Локация:** Хоргос
+│ 🛂 **Статус:** Таможенное оформление
+└────────────────────────────
+"""
+        
+        route_map = self.get_route_map(shipment)
+        response += f"\n{route_map}"
+        response += "\n⏳ Ожидаем завершения таможни"
+        
+        await update.message.reply_text(response)
+
+    async def update_status_delivered(self, update: Update, track_number: str, shipment: dict):
+        """Обновление статуса на 'доставлено'"""
+        shipment['status'] = "доставлен"
+        shipment['route_progress'] = 100
+        self.save_shipment_data(track_number, shipment)
+        
+        response = f"""
+🎉 **ГРУЗ ДОСТАВЛЕН!**
+
+┌────────────────────────────
+│ 📦 **Трек-номер:** {track_number}
+│ 👤 **Клиент:** {shipment.get('fio', 'Не указано')}
+│ 📦 **Товар:** {shipment.get('product', 'Не указано')}
+│ ✅ **Статус:** Доставка завершена
+└────────────────────────────
+"""
+        
+        route_map = self.get_route_map(shipment)
+        response += f"\n{route_map}"
+        response += "\n🏁 Доставка успешно завершена!"
+        
+        await update.message.reply_text(response)
+
+    async def show_shipment_info(self, update: Update, shipment: dict):
+        """Показать информацию о грузе с картой маршрута"""
+        status_emoji = {
+            "принят на складе": "🏭",
+            "в пути до границы": "🚚", 
+            "на границе": "🛃",
+            "в пути до алматы": "🚛",
+            "прибыл в алматы": "🏙️",
+            "доставлен": "✅"
+        }.get(shipment.get('status', ''), '📦')
+        
+        response = f"""
+📦 **ИНФОРМАЦИЯ О ГРУЗЕ**
+
+┌────────────────────────────
+│ {status_emoji} **{shipment['track_number']}**
+├────────────────────────────
+│ 👤 **Клиент:** {shipment.get('fio', 'Не указано')}
+│ 📞 **Телефон:** {shipment.get('phone', 'Не указано')}
+│ 📦 **Товар:** {shipment.get('product', 'Не указано')}
+│ ⚖️ **Вес:** {shipment.get('weight', 0)} кг
+│ 📏 **Объем:** {shipment.get('volume', 0)} м³
+│ 🔄 **Статус:** {shipment.get('status', 'неизвестен')}
+│ 🏭 **Склад:** {shipment.get('warehouse', 'Гуанчжоу')}
+└────────────────────────────
+"""
+        
+        route_map = self.get_route_map(shipment)
+        response += f"\n{route_map}"
+        
+        if shipment.get('status') == 'принят на складе':
+            created_at = datetime.fromisoformat(shipment['created_at'])
+            processing_days = 1 if shipment.get('warehouse') == 'Иу' else 2
+            deadline = created_at + timedelta(days=processing_days)
+            time_left = deadline - datetime.now()
+            
+            if time_left.total_seconds() > 0:
+                hours_left = int(time_left.total_seconds() / 3600)
+                response += f"\n\n⏰ **ДЕДЛАЙН ОТПРАВКИ:**"
+                response += f"\n📅 {deadline.strftime('%d.%m.%Y %H:%M')}"
+                response += f"\n⏱️ **Осталось:** {hours_left} часов"
+            else:
+                response += f"\n\n🚨 **ПРОСРОЧКА!**"
+                response += f"\n🕒 **Просрочено:** {int(-time_left.total_seconds() / 3600)} часов"
+        
+        await update.message.reply_text(response)
+
+    def run(self):
+        """Запуск бота"""
+        if self.application:
+            logger.info("🚀 Запуск бота менеджера Гуанчжоу...")
+            self.application.run_polling()
+        else:
+            logger.error("❌ Бот не настроен!")
+
+if __name__ == '__main__':
+    bot = GuangzhouBot()
+    bot.run()
