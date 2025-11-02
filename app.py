@@ -714,82 +714,55 @@ def get_aisulu_response_with_tools(user_message):
                 dict(function_call.args) if hasattr(function_call, 'args') else {}
             )
             
-            # 2. Получаем запрос от модели (role: model)
-            #    Это candidate.content, он уже в формате genai.types.Content
-            model_request_content = candidate.content
-            
-            # 3. [ИСПРАВЛЕНИЕ] 
-            #    Создаем корректный ответ (role: function),
-            #    который содержит РЕЗУЛЬТАТ (tool_result)
-            
-            function_response_content = genai.Content( # <--- ❌ ЭТО ВЫЗЫВАЕТ ОШИБКУ СМЕШАННОГО СПИСКА
-                parts=[
-                    genai.types.Part( 
-                        function_response=genai.types.FunctionResponse(
-...
-2. Полностью замените этот блок на следующий исправленный код:
-
-(Здесь мы используем genai_types.to_dict() для конвертации объекта ответа модели в словарь, а ответ функции сразу создаем как словарь).
-
-Python
-
-            # 1. Безопасное выполнение инструмента
-            tool_result = execute_tool_function(
-                function_call.name,
-                dict(function_call.args) if hasattr(function_call, 'args') else {}
-            )
-            
-            # 2. Получаем запрос от модели (role: model)
-            #    [ИСПРАВЛЕНИЕ 1] Конвертируем ОБЪЕКТ (candidate.content) в СЛОВАРЬ (dict)
-            #    чтобы избежать ошибки "смешанного списка" (list[dict] + list[Content])
+            # 2. Конвертируем запрос модели в словарь
             try:
-                # Используем псевдоним genai_types, который у вас уже импортирован (L13)
                 model_request_dict = genai_types.to_dict(candidate.content)
             except Exception as e:
                 logger.warning(f"⚠️ Не удалось конвертировать model_request в dict: {e}")
-                # Ручной Fallback на dict, если to_dict не сработает
                 model_request_dict = {
                     "role": "model",
                     "parts": [{"function_call": {"name": function_call.name, "args": dict(function_call.args)}}]
                 }
 
-            # 3. [ИСПРАВЛЕНИЕ 2] 
-            #    Создаем корректный ответ (role: function) тоже в виде СЛОВАРЯ (dict)
+            # 3. Создаем ответ функции в виде словаря
             function_response_content = {
                 "role": "function",
                 "parts": [
-                    { # Это 'Part'
-                        "function_response": { # Это 'FunctionResponse'
+                    {
+                        "function_response": {
                             "name": function_call.name,
                             "response": tool_result 
                         }
                     }
                 ]
             }
-            
-            # 4. Собираем обновленную историю (теперь это список СЛОВАРЕЙ)
+
+            # 4. Собираем обновленную историю
             updated_messages = messages + [model_request_dict, function_response_content]
-            
-            # 5. Делаем финальный запрос к Gemini (теперь он примет list[dict])
+
+            # 5. Делаем финальный запрос к Gemini для форматирования
             try:
                 final_response = model.generate_content(
                     updated_messages,
                     generation_config={'temperature': 0.7}
                 )
                 
-                # Этот код (Шаг 6) ТОЖЕ ВНУТРИ 'try'
                 # 6. Безопасное извлечение текста
-                if (hasattr(final_response, 'candidates') and final_response.candidates and
-                    hasattr(final_response.candidates[0], 'content') and final_response.candidates[0].content and
-                    hasattr(final_response.candidates[0].content, 'parts') and final_response.candidates[0].content.parts and
-                    hasattr(final_response.candidates[0].content.parts[0], 'text')):
+                if (final_response.candidates and 
+                    final_response.candidates[0].content and 
+                    final_response.candidates[0].content.parts and 
+                    final_response.candidates[0].content.parts[0].text):
                     
                     final_text = final_response.candidates[0].content.parts[0].text
                     return final_text
                 else:
-                    logger.error("❌ Не удалось извлечь текст из финального ответа")
-                    # Возвращаем результат tool_result в виде JSON, если модель не смогла его озвучить
-                    return f"✅ Расчет выполнен: {json.dumps(tool_result, ensure_ascii=False)}"
+                    # Fallback: красиво форматируем результат сами
+                    return format_calculation_result(tool_result)
+                    
+            except Exception as e:
+                logger.error(f"❌ Ошибка финального запроса: {e}")
+                # Fallback: красиво форматируем результат сами
+                return format_calculation_result(tool_result)
                     
             except Exception as e:
                 logger.error(f"❌ Ошибка финального запроса: {e}")
