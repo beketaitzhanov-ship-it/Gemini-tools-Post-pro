@@ -845,6 +845,29 @@ def chat():
 
         logger.info(f"📨 Получено сообщение: {user_message}")
 
+        # 🚨 ДОБАВЬТЕ ЭТОТ БЛОК ПРЯМО ЗДЕСЬ - ПРИНУДИТЕЛЬНОЕ ОТСЛЕЖИВАНИЕ
+        track_number = extract_tracking_number(user_message)
+        if track_number:
+            logger.info(f"🔍 Обнаружен трек-номер: {track_number}, принудительно отслеживаю")
+            tracking_result = process_tracking_request(track_number)
+            response_text = format_tracking_for_display(tracking_result)
+            
+            # Сохраняем в историю
+            try:
+                if 'chat_history' not in session:
+                    session['chat_history'] = []
+                session['chat_history'].append(f"Клиент: {user_message}")
+                session['chat_history'].append(f"Айсулу: {response_text}")
+                
+                # Ограничение истории
+                if len(session['chat_history']) > 20:
+                    session['chat_history'] = session['chat_history'][-16:]
+            except Exception as e:
+                logger.error(f"❌ Ошибка сохранения истории: {e}")
+                
+            return jsonify({"response": response_text})
+        # 🚨 КОНЕЦ ДОБАВЛЕННОГО БЛОКА
+
         # Безопасная инициализация сессии
         try:
             if 'chat_history' not in session:
