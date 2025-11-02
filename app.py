@@ -2,7 +2,6 @@
 import os
 import json
 import logging
-import re
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, session
 from flask_session import Session  
@@ -17,6 +16,57 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# ===== ДОБАВЬ ЭТИ 2 ФУНКЦИИ СЮДА =====
+import re
+
+def extract_tracking_number(text):
+    """Извлекает трек-номер из текста"""
+    try:
+        # Ищем GZ/IY/SZ + 6 цифр
+        pattern = r'\b(GZ|IY|SZ)(\d{6})\b'
+        match = re.search(pattern, text.upper())
+        if match:
+            return match.group(0)
+        return None
+    except Exception as e:
+        logger.error(f"Ошибка извлечения трек-номера: {e}")
+        return None
+
+def format_tracking_for_display(tracking_result):
+    """Форматирует результат отслеживания"""
+    try:
+        if not tracking_result.get('success'):
+            return f"❌ {tracking_result.get('error', 'Груз не найден')}"
+        
+        progress = tracking_result.get('progress_percent', 0)
+        bars = 10
+        filled = int(bars * progress / 100)
+        progress_bar = "🟩" * filled + "⬜" * (bars - filled)
+        
+        status_emoji = tracking_result.get('status_emoji', '📦')
+        
+        return f"""
+📦 **ОТСЛЕЖИВАНИЕ ГРУЗА**
+
+┌────────────────────────────
+│ {status_emoji} **{tracking_result['tracking_number']}**
+├────────────────────────────
+│ 👤 **Получатель:** {tracking_result.get('recipient', 'Не указано')}
+│ 📦 **Товар:** {tracking_result.get('product', 'Не указано')}
+│ ⚖️ **Вес:** {tracking_result.get('weight_kg', 0)} кг
+│ 📏 **Объем:** {tracking_result.get('volume_m3', 0)} м³
+│ 🔄 **Статус:** {tracking_result.get('status', 'Неизвестен')}
+└────────────────────────────
+
+📊 **Прогресс:** {progress_bar} {progress}%
+
+💡 Для подробной информации свяжитесь с менеджером
+"""
+    except Exception as e:
+        logger.error(f"Ошибка форматирования отслеживания: {e}")
+        return f"✅ Груз найден: {json.dumps(tracking_result, ensure_ascii=False)}"
+# ===== КОНЕЦ ДОБАВЛЯЕМЫХ ФУНКЦИЙ =====
 
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
