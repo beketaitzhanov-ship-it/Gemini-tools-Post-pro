@@ -34,12 +34,34 @@ def extract_tracking_number(text):
         return None
 
 def format_tracking_for_display(tracking_result):
-    """Форматирует результат отслеживания"""
+    """Форматирует результат отслеживания с картой городов"""
     try:
         if not tracking_result.get('success'):
             return f"❌ {tracking_result.get('error', 'Груз не найден')}"
         
         progress = tracking_result.get('progress_percent', 0)
+        
+        # Карта маршрута Гуанчжоу
+        route = [
+            {"city": "🏭 Гуанчжоу", "progress": 0},
+            {"city": "📍 Наньчан", "progress": 15},
+            {"city": "📍 Ухань", "progress": 30},
+            {"city": "📍 Сиань", "progress": 46},
+            {"city": "📍 Ланьчжоу", "progress": 61},
+            {"city": "📍 Урумчи", "progress": 76},
+            {"city": "🛃 Хоргос", "progress": 85},
+            {"city": "🏙️ Алматы", "progress": 100}
+        ]
+        
+        # Строим карту маршрута
+        map_text = "🗺️ **МАРШРУТ ДОСТАВКИ:**\n\n"
+        for point in route:
+            if progress >= point['progress']:
+                map_text += f"✅ {point['city']}\n"
+            else:
+                map_text += f"⏳ {point['city']}\n"
+        
+        # Прогресс-бар
         bars = 10
         filled = int(bars * progress / 100)
         progress_bar = "🟩" * filled + "⬜" * (bars - filled)
@@ -59,6 +81,7 @@ def format_tracking_for_display(tracking_result):
 │ 🔄 **Статус:** {tracking_result.get('status', 'Неизвестен')}
 └────────────────────────────
 
+{map_text}
 📊 **Прогресс:** {progress_bar} {progress}%
 
 💡 Для подробной информации свяжитесь с менеджером
