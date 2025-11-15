@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()
 TOKEN = os.getenv('GUANGZHOU_BOT_TOKEN') 
 DATABASE_URL = os.getenv('DATABASE_URL')
-MAKE_WAREHOUSE_WEBHOOK = os.getenv('MAKE_WAREHOUSE_WEBHOOK')
+MAKE_WAREHOUSE_WEBHOOK = "https://hook.eu1.make.com/qjsepifbths7ek1hkv91cdid7kt4xjqx"
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -198,4 +198,5 @@ class GuangzhouBot:
 
 if __name__ == '__main__':
     bot = GuangzhouBot()
+
     bot.run()
