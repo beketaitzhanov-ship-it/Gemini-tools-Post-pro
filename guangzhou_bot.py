@@ -199,14 +199,16 @@ async def save_contract_final_with_media(update: Update, context: ContextTypes.D
         media_type = "video"
     
     if file_id:
-        try:
-            # Получаем объект файла и его путь
-            file = await context.bot.get_file(file_id)
-            # Собираем полную, публично доступную (для Make) ссылку
-            media_link = f"https://api.telegram.org/file/bot{TOKEN}/{file.file_path}"
-        except Exception as e:
-            logger.error(f"Не удалось создать ссылку на медиа: {e}")
-            media_link = "Ошибка получения ссылки"
+    try:
+        file = await context.bot.get_file(file_id)
+        file_path_clean = file.file_path.split('https://api.telegram.org/file/bot')[0] 
+        
+        # Собираем полную, публично доступную (для Make) ссылку
+        # Это гарантирует, что мы используем ТОЛЬКО наш TOKEN и ПУТЬ
+        media_link = f"https://api.telegram.org/file/bot{TOKEN}/{file_path_clean}"
+    except Exception as e:
+        logger.error(f"Не удалось создать ссылку на медиа: {e}")
+        media_link = "Ошибка получения ссылки"
     # --- Конец исправления ---
 
     data = context.user_data
@@ -325,3 +327,4 @@ if __name__ == '__main__':
         
         logger.info("🚀 Складской бот запущен...")
         app.run_polling()
+
