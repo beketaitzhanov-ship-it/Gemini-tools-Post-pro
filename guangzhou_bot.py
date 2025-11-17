@@ -101,8 +101,8 @@ async def show_expected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not conn: return
     cur = conn.cursor()
     
-    # --- ИСПРАВЛЕНО: Ищем статус, который устанавливает "Сценарий 1" ---
-    cur.execute("SELECT contract_num, fio, product, declared_weight FROM shipments WHERE status ILIKE 'Ожидается на складе' ORDER BY created_at DESC LIMIT 10")
+    # --- ИСПРАВЛЕНО: Возвращаем поиск на 'оформлен' (наиболее вероятный статус Admin Bot) ---
+    cur.execute("SELECT contract_num, fio, product, declared_weight FROM shipments WHERE status ILIKE 'оформлен' ORDER BY created_at DESC LIMIT 10")
     
     rows = cur.fetchall()
     conn.close()
@@ -239,7 +239,7 @@ async def save_contract_final_with_media(update: Update, context: ContextTypes.D
         conn.commit()
         conn.close()
         
-        # --- ИСПРАВЛЕНО: Собираем ТОЧНЫЙ payload для "Сценария 2" и исправлен вызов notify_make ---
+        # --- ИСПРАВЛЕНО: Собираем ТОЧНЫЙ payload для "Сценария 2" ---
         make_payload = {
             "contract_num": contract_num,
             "actual_weight": weight,
