@@ -25,9 +25,10 @@ try:
     T2_RATES = CONFIG['T2_RATES_DETAILED']
     ZONES = CONFIG['DESTINATION_ZONES']
     EXCHANGE_RATE = CONFIG['EXCHANGE_RATE']['rate']
+    PRODUCT_CATEGORIES = CONFIG.get("PRODUCT_CATEGORIES", {})
 except Exception as e:
     logger.error(f"!!! КРИТИЧЕСКАЯ ОШИБКА: Не могу загрузить config.json: {e}")
-    T1_RATES, T2_RATES, ZONES, EXCHANGE_RATE = {}, {}, {}, 550
+    T1_RATES, T2_RATES, ZONES, EXCHANGE_RATE, PRODUCT_CATEGORIES = {}, {}, {}, 550, {}
 
 # Состояния
 ASK_NAME, ASK_PHONE, ASK_CITY, ASK_WAREHOUSE, ASK_CARGO, ASK_WEIGHT, ASK_VOLUME, ASK_CONFIRM_CALC, ASK_MANUAL_RATE, CONFIRM = range(10)
@@ -42,64 +43,64 @@ def force_delete_webhook(token):
     except: pass
 
 # --- КАЛЬКУЛЯТОР (ВНУТРИ БОТА, ЧИТАЕТ CONFIG.JSON) ---
+
+def find_product_category(product_type_text):
+    text_lower = product_type_text.lower()
+    for category, data in PRODUCT_CATEGORIES.items():
+        for keyword in data.get("keywords", []):
+            if keyword in text_lower:
+                return category
+    return "общие"
+
 def get_t1_cost(weight, volume, category_name="общие", warehouse_code="GZ"):
     try:
         density = weight / volume if volume > 0 else 0
-        
-        # 1. Ищем тарифы для склада
-        warehouse_rates = T1_RATES.get(warehouse_code, T1_RATES.get("GZ")) # Если нет FS/IW, берем GZ
-        
-        # 2. Ищем по категории, потом в "общих"
+        warehouse_rates = T1_RATES.get(warehouse_code, T1_RATES.get("GZ"))
         rules = warehouse_rates.get(category_name, warehouse_rates.get("общие"))
         
-        # 3. Ищем по плотности
         for rule in sorted(rules, key=lambda x: x.get('min_density', 0), reverse=True):
             if density >= rule.get('min_density', 0):
                 price = rule.get('price', 0)
                 unit = rule.get('unit', 'kg')
                 cost_usd = price * volume if unit == 'm3' else price * weight
-                return cost_usd, price, density # (Сумма, Тариф, Плотность)
-        
+                return cost_usd, price, density
         return 0, 0, density
     except Exception as e:
         logger.error(f"Ошибка T1: {e}"); return 0, 0, 0
 
 def get_t2_cost(weight, zone):
     try:
-        if zone == 'алматы': return 0 # T2 до Алматы не нужен
-        
+        if zone == 'алматы': return 0
         rules = T2_RATES.get('large_parcel', {})
         weight_ranges = rules.get('weight_ranges', [])
         extra_rates = rules.get('extra_kg_rate', {})
-        
         for r in weight_ranges:
             if weight <= r['max']:
-                return float(r['zones'].get(zone, 0)) # Цена по шагу
-        
-        # Если вес больше (напр > 20кг)
+                return float(r['zones'].get(zone, 0))
         if weight_ranges:
             max_w = weight_ranges[-1]['max']
             base_cost = float(weight_ranges[-1]['zones'].get(zone, 0))
             extra_rate = float(extra_rates.get(zone, 300))
             return base_cost + ((weight - max_w) * extra_rate)
-            
         return weight * 300
     except Exception as e:
         logger.error(f"Ошибка T2: {e}"); return 0
 
-def calculate_all(weight, volume, product_type, city, warehouse_code="GZ"):
-    # 1. T1 (Китай-Алматы) + 30%
-    raw_t1_usd, raw_rate, density = get_t1_cost(weight, volume, product_type, warehouse_code)
+def calculate_all(weight, volume, product_type_text, city, warehouse_code="GZ"):
+    rate_kzt = EXCHANGE_RATE
+    category = find_product_category(product_type_text)
+    
+    # 1. T1 + 30%
+    raw_t1_usd, raw_rate, density = get_t1_cost(weight, volume, category, warehouse_code)
     client_t1_usd = raw_t1_usd * 1.30
     client_rate = raw_rate * 1.30
     
-    # 2. T2 (Алматы-Регион) + 20%
-    zone = ZONES.get(city.lower(), "5") # find_zone
+    # 2. T2 + 20%
+    zone = ZONES.get(city.lower().strip(), "5")
     client_t2_kzt = get_t2_cost(weight, zone) * 1.20
     
-    # 3. Итог
-    total_usd = client_t1_usd # В договор идет только T1
-    total_kzt_estimate = (client_t1_usd * EXCHANGE_RATE) + client_t2_kzt
+    total_usd = client_t1_usd
+    total_kzt_estimate = (client_t1_usd * rate_kzt) + client_t2_kzt
 
     return {
         "success": True, "density": round(density, 2),
@@ -107,6 +108,7 @@ def calculate_all(weight, volume, product_type, city, warehouse_code="GZ"):
         "t2_kzt": round(client_t2_kzt, 2), "total_usd": round(total_usd, 2),
         "total_kzt": round(total_kzt_estimate), "warehouse_code": warehouse_code
     }
+# --- КОНЕЦ КАЛЬКУЛЯТОРА ---
 
 # --- СОХРАНЕНИЕ В БАЗУ (POSTGRESQL) ---
 def save_contract_to_db(data):
@@ -123,8 +125,9 @@ def save_contract_to_db(data):
             client_city, agreed_rate, total_price_final, 
             status, created_at, manager, warehouse_code, source
         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s, %s, 'Manager')
-        ON CONFLICT (contract_num) DO NOTHING;
+        ON CONFLICT (contract_num) DO NOTHING; 
         """
+        # ON CONFLICT DO NOTHING - чтобы не было ошибки дубликата
         
         track_temp = f"DOC-{data['contract_num']}" 
 
@@ -198,7 +201,6 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def get_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['c_city'] = update.message.text
-    # 🔥 ШАГ 4: ВЫБОР СКЛАДА
     keyboard = [[InlineKeyboardButton("🏭 Гуанчжоу (GZ)", callback_data='wh_GZ')],
                 [InlineKeyboardButton("🛋 Фошань (FS)", callback_data='wh_FS')],
                 [InlineKeyboardButton("🏗 Иу (IW)", callback_data='wh_IW')]]
@@ -233,7 +235,7 @@ async def get_volume(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['c_weight'], vol, 
             context.user_data['c_cargo'], 
             context.user_data['c_city'],
-            context.user_data['c_warehouse'] # GZ, FS или IW
+            context.user_data['c_warehouse']
         )
         
         context.user_data['calc_rate'] = res['tariff_rate']
@@ -272,7 +274,7 @@ async def get_manual_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def show_summary(message_obj, context):
     text = (f"📑 **ИТОГ:**\n👤 {context.user_data['c_name']}\n📦 {context.user_data['c_cargo']}\n💰 ${context.user_data['final_total']} (Предв.)\n\nГенерируем?")
-    kb = [[InlineKeyboardButton("✅ Да", callback_data='generate_yes'), InlineKeyboardButton("❌ Нет", callback_data='generate_no')]]
+    kb = [[InlineKeyboardButton("✅ Да", callback_data='generate_yes'), InlineKeyboardButton("❌ Отмена", callback_data='generate_no')]]
     if hasattr(message_obj, 'reply_text'): await message_obj.reply_text(text, reply_markup=InlineKeyboardMarkup(kb))
     else: await message_obj.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb))
 
@@ -283,7 +285,7 @@ async def generate_contract(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await query.edit_message_text("⏳ **Печатаю...**")
     
-    cn = f"CN-{datetime.now().strftime('%m%d%H%M%S')}"
+    cn = f"CN-{datetime.now().strftime('%m%d%H%M%S')}" # Уникальный ID
     data = context.user_data
     
     payload = {
@@ -311,7 +313,7 @@ async def generate_contract(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if db_success:
             await query.message.reply_text(f"✅ **Договор {cn} создан!**\n💾 Сохранен в базу.")
         else:
-            await query.message.reply_text(f"⚠️ PDF отправлен, но **ОШИБКА БАЗЫ**.")
+            await query.message.reply_text(f"⚠️ PDF отправлен, но **ОШИБКА БАЗЫ**. Проверь логи!")
     except: pass
     return ConversationHandler.END
 
