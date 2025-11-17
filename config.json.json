@@ -1,0 +1,163 @@
+{
+  "EXCHANGE_RATE": {
+    "rate": 550,
+    "currency_from": "USD",
+    "currency_to": "KZT"
+  },
+  "GREETINGS": [
+    "привет",
+    "здравствуй",
+    "салем"
+  ],
+  "DESTINATION_ZONES": {
+    "алматы": "алматы",
+    "астана": "3",
+    "караганда": "3",
+    "шымкент": "2",
+    "тараз": "2",
+    "туркестан": "2",
+    "талдыкорган": "1",
+    "кокшетау": "3",
+    "кызылорда": "5",
+    "петропавловск": "5",
+    "павлодар": "5",
+    "экибастуз": "5",
+    "костанай": "5",
+    "рудный": "5",
+    "семей": "5",
+    "актобе": "4",
+    "уральск": "4",
+    "атырау": "4",
+    "актау": "5",
+    "усть-каменогорск": "5"
+  },
+  "PRODUCT_CATEGORIES": {
+    "одежда": { "keywords": ["одежда", "вещи", "шмотки", "куртка", "джинсы", "платье", "текстиль"] },
+    "мебель": { "keywords": ["мебель", "диван", "стол", "стул", "шкаф", "кровать", "посуда", "стройматериалы"] },
+    "техника": { "keywords": ["техника", "электроника", "телефон", "ноутбук", "телевизор"] },
+    "автозапчасти": { "keywords": ["автозапчасти", "запчасти", "шина", "диск", "бампер"] },
+    "общие": { "keywords": ["товар", "груз", "коробки", "вещи"] }
+  },
+  
+  "T1_RATES_DENSITY": {
+    
+    "GZ": {
+      "общие": [
+        { "min_density": 400, "price": 0.7, "unit": "kg" },
+        { "min_density": 300, "price": 0.8, "unit": "kg" },
+        { "min_density": 250, "price": 0.9, "unit": "kg" },
+        { "min_density": 200, "price": 1.0, "unit": "kg" },
+        { "min_density": 170, "price": 1.1, "unit": "kg" },
+        { "min_density": 130, "price": 1.2, "unit": "kg" },
+        { "min_density": 100, "price": 1.3, "unit": "kg" },
+        { "min_density": 0, "price": 130, "unit": "m3" }
+      ],
+      "автозапчасти": [
+        { "min_density": 400, "price": 0.9, "unit": "kg" },
+        { "min_density": 300, "price": 1.0, "unit": "kg" },
+        { "min_density": 250, "price": 1.1, "unit": "kg" },
+        { "min_density": 200, "price": 1.2, "unit": "kg" },
+        { "min_density": 170, "price": 1.3, "unit": "kg" },
+        { "min_density": 130, "price": 1.4, "unit": "kg" },
+        { "min_density": 100, "price": 1.5, "unit": "kg" },
+        { "min_density": 0, "price": 150, "unit": "m3" }
+      ],
+      "одежда": [
+        { "min_density": 200, "price": 2.2, "unit": "kg" },
+        { "min_density": 170, "price": 2.3, "unit": "kg" },
+        { "min_density": 130, "price": 2.4, "unit": "kg" },
+        { "min_density": 100, "price": 2.5, "unit": "kg" },
+        { "min_density": 0, "price": 250, "unit": "m3" }
+      ],
+      "мебель": [
+        { "min_density": 600, "price": 0.6, "unit": "kg" },
+        { "min_density": 400, "price": 0.65, "unit": "kg" },
+        { "min_density": 300, "price": 0.7, "unit": "kg" },
+        { "min_density": 250, "price": 0.8, "unit": "kg" },
+        { "min_density": 200, "price": 0.85, "unit": "kg" }
+      ]
+    },
+    
+    "FS": {
+      "общие": [
+        { "min_density": 400, "price": 0.7, "unit": "kg" },
+        { "min_density": 300, "price": 0.8, "unit": "kg" },
+        { "min_density": 250, "price": 0.9, "unit": "kg" },
+        { "min_density": 200, "price": 1.0, "unit": "kg" },
+        { "min_density": 170, "price": 1.1, "unit": "kg" },
+        { "min_density": 130, "price": 1.2, "unit": "kg" },
+        { "min_density": 100, "price": 1.3, "unit": "kg" },
+        { "min_density": 0, "price": 130, "unit": "m3" }
+      ],
+      "автозапчасти": [
+        { "min_density": 400, "price": 0.9, "unit": "kg" },
+        { "min_density": 300, "price": 1.0, "unit": "kg" },
+        { "min_density": 250, "price": 1.1, "unit": "kg" },
+        { "min_density": 200, "price": 1.2, "unit": "kg" },
+        { "min_density": 170, "price": 1.3, "unit": "kg" },
+        { "min_density": 130, "price": 1.4, "unit": "kg" },
+        { "min_density": 100, "price": 1.5, "unit": "kg" },
+        { "min_density": 0, "price": 150, "unit": "m3" }
+      ],
+      "одежда": [
+        { "min_density": 200, "price": 2.2, "unit": "kg" },
+        { "min_density": 170, "price": 2.3, "unit": "kg" },
+        { "min_density": 130, "price": 2.4, "unit": "kg" },
+        { "min_density": 100, "price": 2.5, "unit": "kg" },
+        { "min_density": 0, "price": 250, "unit": "m3" }
+      ],
+      "мебель": [
+        { "min_density": 600, "price": 0.6, "unit": "kg" },
+        { "min_density": 400, "price": 0.65, "unit": "kg" },
+        { "min_density": 300, "price": 0.7, "unit": "kg" },
+        { "min_density": 250, "price": 0.8, "unit": "kg" },
+        { "min_density": 200, "price": 0.85, "unit": "kg" }
+      ]
+    },
+
+    "IW": {
+      "косметика": [
+        { "min_density": 400, "price": 1.2, "unit": "kg" },
+        { "min_density": 100, "price": 2.5, "unit": "kg" },
+        { "min_density": 0, "price": 260, "unit": "m3" }
+      ],
+      "мебель": [
+        { "min_density": 400, "price": 0.8, "unit": "kg" },
+        { "min_density": 100, "price": 2.2, "unit": "kg" },
+        { "min_density": 0, "price": 230, "unit": "m3" }
+      ],
+      "техника": [
+        { "min_density": 400, "price": 1.4, "unit": "kg" },
+        { "min_density": 100, "price": 2.6, "unit": "kg" },
+        { "min_density": 0, "price": 270, "unit": "m3" }
+      ],
+      "общие": [
+        { "min_density": 400, "price": 1.0, "unit": "kg" },
+        { "min_density": 200, "price": 1.5, "unit": "kg" },
+        { "min_density": 100, "price": 2.2, "unit": "kg" },
+        { "min_density": 0, "price": 240, "unit": "m3" }
+      ],
+      "одежда": [
+        { "min_density": 400, "price": 2.8, "unit": "kg" },
+        { "min_density": 100, "price": 4.2, "unit": "kg" },
+        { "min_density": 0, "price": 430, "unit": "m3" }
+      ]
+    }
+  },
+
+  "T2_RATES_DETAILED": {
+    "large_parcel": {
+      "weight_ranges": [
+        { "max": 1, "zones": { "1": 2205, "2": 2310, "3": 2415, "4": 2520, "5": 2625 }},
+        { "max": 2, "zones": { "1": 2310, "2": 2420, "3": 2530, "4": 2640, "5": 2750 }},
+        { "max": 20, "zones": { "1": 4200, "2": 4400, "3": 4600, "4": 4800, "5": 5000 }}
+      ],
+      "extra_kg_rate": {
+        "1": 220, "2": 230, "3": 240, "4": 250, "5": 260
+      }
+    }
+  },
+  "PROHIBITED_GOODS": {
+    "warning_message": " **Внимание! Запрещены к перевозке:**\n\n Опасные грузы (оружие, взрывчатки)\n Наркотики и психотропные вещества\n Деньги, драгоценности\n Лекарства без сертификатов\n Алкоголь и табачные изделия\n Скоропортящиеся продукты"
+  }
+}
