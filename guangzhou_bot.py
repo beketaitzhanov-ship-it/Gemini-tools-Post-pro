@@ -1,7 +1,7 @@
 import os
 import logging
 import random
-import psycopg2
+import psycopg as psycopg2
 import requests
 import json
 from datetime import datetime
@@ -616,3 +616,4 @@ if __name__ == '__main__':
         setup_handlers(app)
         logger.info("🚀 Складской бот запущен...")
         app.run_polling()
+
