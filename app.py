@@ -588,7 +588,7 @@ def setup_application():
             ADM_WEIGHT: [MessageHandler(filters.TEXT, admin_w)],
             ADM_VOLUME: [MessageHandler(filters.TEXT, admin_v_preview)], 
             ADM_CONFIRM: [CallbackQueryHandler(admin_confirm_handler)],
-            ADM_EDIT_INPUT: [MessageHandler(filters.TEXT, admin_edit_field_handler)]
+            ADM_EDIT_FIELD: [MessageHandler(filters.TEXT, admin_edit_field_handler)]
         },
         fallbacks=[CommandHandler('cancel', cancel), MessageHandler(filters.Regex('^🔙 Выход'), start)]
     )
@@ -612,3 +612,4 @@ if __name__ == '__main__':
     else:
         app = setup_application()
         app.run_polling()
+
